@@ -8,7 +8,8 @@
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:local": "node --no-warnings scripts/migrate-local.mjs",
+    "build:worker": "opennextjs-cloudflare build",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"

@@ -10,107 +10,72 @@ Chạy trên **Cloudflare Workers + D1** (serverless) thông qua **Next.js App R
 
 ## Yêu cầu
 
-- Node.js 20 trở lên (khuyến nghị 22+; đã phát triển và kiểm thử trên Node 26)
+- Node.js 22.5 trở lên (script migrate local dùng `node:sqlite`; đã kiểm thử trên Node 26)
 - npm 10 trở lên
 - Một tài khoản Cloudflare (chỉ cần khi triển khai thật)
-
-## Cài đặt
-
-```bash
-npm install
-```
 
 ## Chạy ở máy cục bộ
 
 ```bash
-# 1. Tạo cơ sở dữ liệu D1 mô phỏng ở máy và áp dụng migration
-npm run db:migrate:local
-
-# 2. Chạy máy chủ phát triển
-npm run dev
+npm install
+npm run dev                 # mở http://localhost:3000 một lần để tạo DB D1 mô phỏng
+npm run db:migrate:local    # áp migrations/*.sql vào DB local (chỉ local, không đụng Cloudflare)
 ```
 
-Mở http://localhost:3000. Ứng dụng tự chuyển hướng `/` sang `/groups`, và `/groups` yêu cầu
-đăng nhập nên bạn sẽ được đưa tới `/login`.
+Từ đó `/` chuyển sang `/groups`, và chưa đăng nhập sẽ được đưa tới `/login`.
+`next dev` đọc binding D1 `DB` từ `wrangler.jsonc` nhờ `initOpenNextCloudflareForDev()`.
 
-`next dev` đọc các binding trong `wrangler.jsonc` nhờ `initOpenNextCloudflareForDev()` trong
-`next.config.ts`, nên binding D1 tên `DB` có sẵn ngay khi phát triển cục bộ.
-
-## Kiểm thử và kiểm tra kiểu
+## Kiểm thử
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run
+npm test            # vitest run (xác thực, validate, chia tiền, tất toán)
+npm run build       # next build
+npm run build:worker  # đóng gói Worker bằng OpenNext -> .open-next/worker.js
 ```
 
 ## Cấu trúc dự án
 
 ```
-app/                  # Next.js App Router (trang, layout, CSS toàn cục)
-components/           # AppHeader, GroupNav
-lib/                  # types, errors, http, validate, db, auth, activity, api-client, format
+app/                  # Next.js App Router: trang + API route
+components/           # AppHeader, GroupNav, ExpenseForm
+lib/                  # types, errors, http, validate, db, auth, activity, api-client, format,
+                      # group-queries, expenses, split (chia tiền), settle (tất toán)
 migrations/           # migration D1 (0001_init.sql)
-docs/CONTRACT.md      # hợp đồng tích hợp API (nguồn chân lý)
-wrangler.jsonc        # cấu hình Worker + binding D1 + thư mục migration
+scripts/              # migrate-local.mjs
+docs/CONTRACT.md      # hợp đồng API (nguồn chân lý)
 proxy.ts              # chặn truy cập chưa đăng nhập (quy ước "proxy" của Next.js 16)
 ```
 
 ## Triển khai lên Cloudflare
 
-### 1. Đăng nhập
+Phần đóng gói (`npm run build:worker`) đã kiểm chứng chạy được. Việc đẩy lên Cloudflare thì
+cần tài khoản của bạn và có một điểm cần lưu ý về công cụ:
+
+- **Trong môi trường studio** chỉ được dùng CLI `cf` (hook chặn `wrangler`). `cf` build bằng
+  Vite và `cf migrate` cần wrangler cục bộ, nên chưa có đường chính thức cho Next.js qua
+  OpenNext. Đây là một gap cần báo cho owner của skill `t1k-cloudflare`, không lách bằng
+  wrangler.
+- **Ngoài môi trường studio**, các bước dưới đây hoạt động bình thường.
 
 ```bash
 npx wrangler login
+npx wrangler d1 create expense-splitter     # chép database_id in ra vào wrangler.jsonc
+npm run db:migrate:remote                   # áp migration lên D1 thật
+npm run deploy                              # opennextjs-cloudflare build + deploy
 ```
 
-### 2. Tạo cơ sở dữ liệu D1
-
-```bash
-npx wrangler d1 create expense-splitter
-```
-
-Lệnh này in ra một `database_id`. Sao chép giá trị đó vào `wrangler.jsonc`, thay cho
-`database_id` đang là giá trị tạm `00000000-0000-0000-0000-000000000000`.
-
-> Migration cục bộ (`--local`) chạy được với giá trị tạm, nhưng triển khai thật thì bắt buộc
-> phải có `database_id` chính xác.
-
-### 3. Áp dụng migration lên cơ sở dữ liệu thật
-
-```bash
-npm run db:migrate:remote
-```
-
-Kiểm tra lại bằng:
-
-```bash
-npx wrangler d1 execute expense-splitter --remote --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
-```
-
-### 4. Triển khai
-
-```bash
-npm run deploy
-```
-
-`npm run deploy` chạy `opennextjs-cloudflare build` rồi `opennextjs-cloudflare deploy`.
-
-Để xem trước bản dựng trong môi trường Workers ngay trên máy:
-
-```bash
-npm run preview
-```
+`database_id` trong `wrangler.jsonc` đang là giá trị tạm, deploy thật bắt buộc phải thay.
 
 ## Ghi chú kỹ thuật
 
-- **Tiền tệ** là số nguyên đồng (VND), không bao giờ dùng số thập phân; hiển thị dạng
-  `120.000đ`.
-- **Chia đều**: hoà giải phần lẻ bằng cách cộng 1 đồng cho những thành viên đầu tiên theo thứ
-  tự id tăng dần, nên tổng các phần luôn bằng đúng số tiền của khoản chi.
+- **Tiền tệ** là số nguyên đồng (VND), không dùng số thập phân; hiển thị dạng `120.000đ`.
+- **Chia đều**: phần lẻ được cộng 1 đồng cho những thành viên đầu tiên theo thứ tự id tăng dần,
+  nên tổng các phần luôn bằng đúng số tiền của khoản chi.
 - **Xoá mềm**: thành viên bị xoá (`removed_at`) và khoản chi bị xoá (`deleted_at`) vẫn được giữ
-  lại để nhật ký và lịch sử vẫn đọc được.
-- **Mật khẩu** được băm bằng PBKDF2-SHA256 (100.000 vòng lặp) qua WebCrypto, mỗi mật khẩu có
-  muối riêng. Cơ sở dữ liệu chỉ lưu mã băm SHA-256 của token phiên, không lưu token gốc.
-- **Nhật ký hoạt động**: mỗi thao tác thay đổi dữ liệu ghi thêm một dòng vào `activity_log`
-  trong cùng một batch D1 với thao tác đó, nên nhật ký luôn khớp với dữ liệu.
-- Chi tiết đầy đủ về API, mã lỗi và lược đồ dữ liệu: xem [`docs/CONTRACT.md`](docs/CONTRACT.md).
+  để nhật ký và lịch sử đọc được; thành viên đã xoá vẫn có mặt trong tất toán nếu còn số dư.
+- **Mật khẩu** băm PBKDF2-SHA256 (100.000 vòng) qua WebCrypto, mỗi mật khẩu một muối riêng.
+  DB chỉ lưu SHA-256 của token phiên, không lưu token gốc.
+- **Nhật ký hoạt động**: mỗi thao tác ghi một dòng `activity_log` trong cùng batch D1 với thao
+  tác đó, nên nhật ký luôn khớp dữ liệu.
+- Chi tiết API, mã lỗi, lược đồ dữ liệu: [`docs/CONTRACT.md`](docs/CONTRACT.md).
