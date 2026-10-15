@@ -67,7 +67,13 @@ export function GroupNav({ groupId }: GroupNavProps) {
   return (
     <nav className="group-nav">
       <div className="container">
-        <p className="group-nav-title">{groupName ?? "Nhóm"}</p>
+        <div className="row row-between">
+          <p className="group-nav-title">{groupName ?? "Nhóm"}</p>
+          {/* /groups lists every group you are in and hosts the "join by invite code" form. */}
+          <Link className="btn btn-ghost" href="/groups">
+            Đổi nhóm / Tham gia nhóm khác
+          </Link>
+        </div>
         <ul className="tabs">
           {tabs.map((tab) => {
             const active = isActive(tab.href);
