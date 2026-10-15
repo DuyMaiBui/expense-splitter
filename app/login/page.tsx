@@ -20,8 +20,12 @@ export default function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      await api<{ user: User }>("/api/auth/login", { method: "POST", body: { username, password } });
-      router.replace("/groups");
+      const { user } = await api<{ user: User }>("/api/auth/login", {
+        method: "POST",
+        body: { username, password },
+      });
+      // The admin account has no groups: its only screen is /admin.
+      router.replace(user.role === "admin" ? "/admin" : "/groups");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Đăng nhập thất bại.");
       setBusy(false);

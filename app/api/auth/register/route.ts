@@ -7,12 +7,18 @@ import { obj, str } from "@/lib/validate";
 
 const USERNAME_PATTERN = /^[a-z0-9_.]+$/;
 
+/** Names that read as the admin account: nobody may register them (phishing and squatting). */
+const RESERVED_USERNAMES = new Set(["admin", "administrator", "quantri", "root", "support"]);
+
 export const POST = route(async (req) => {
   const body = await readJson(req, (raw) => {
     const o = obj(raw, "body");
     const username = str(o.username, "username", { min: 3, max: 32 }).toLowerCase();
     if (!USERNAME_PATTERN.test(username)) {
       throw badRequest("Tên đăng nhập chỉ gồm chữ thường, số, dấu gạch dưới và dấu chấm.");
+    }
+    if (RESERVED_USERNAMES.has(username)) {
+      throw badRequest("Tên đăng nhập này được dành riêng, hãy chọn tên khác.");
     }
     return {
       username,
@@ -51,6 +57,12 @@ export const POST = route(async (req) => {
 
   await createSession(id);
 
-  const user: User = { id, username: body.username, displayName: body.displayName, createdAt };
+  const user: User = {
+    id,
+    username: body.username,
+    displayName: body.displayName,
+    role: "user",
+    createdAt,
+  };
   return ok({ user }, 201);
 }, { limit: "auth" }); // also caps account-spam writes to D1

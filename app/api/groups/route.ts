@@ -1,5 +1,5 @@
 import { logStatement } from "@/lib/activity";
-import { requireUser } from "@/lib/auth";
+import { rejectAdmin, requireUser } from "@/lib/auth";
 import { getDb, newId, nowIso } from "@/lib/db";
 import { internal } from "@/lib/errors";
 import { generateInviteCode, getGroupView, listGroupsForUser } from "@/lib/group-queries";
@@ -8,12 +8,14 @@ import { obj, str } from "@/lib/validate";
 
 export const GET = route(async () => {
   const user = await requireUser();
+  rejectAdmin(user); // the groups page redirects the admin account to /admin on this 403
   const groups = await listGroupsForUser(getDb(), user.id);
   return ok({ groups });
 });
 
 export const POST = route(async (req) => {
   const user = await requireUser();
+  rejectAdmin(user);
   const { name } = await readJson(req, (raw) => ({
     name: str(obj(raw, "body").name, "name", { min: 1, max: 60 }),
   }));

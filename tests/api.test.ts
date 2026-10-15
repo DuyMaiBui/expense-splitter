@@ -5,7 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestDb, type TestDb } from "./helpers/d1";
 
-import { clearSessionCache } from "@/lib/auth";
+import { buildAdminSql } from "../scripts/create-admin.mjs";
+
+import { clearSessionCache, hashPassword, verifyPassword } from "@/lib/auth";
 import { loadExpenseList } from "@/lib/expenses";
 import { MEMORY_RULES, resetRateLimits } from "@/lib/rate-limit";
 
@@ -22,6 +24,8 @@ import { GET as membersGET, POST as membersPOST } from "@/app/api/groups/[groupI
 import { DELETE as presetDELETE, PUT as presetPUT } from "@/app/api/groups/[groupId]/presets/[presetId]/route";
 import { GET as presetsGET, POST as presetsPOST } from "@/app/api/groups/[groupId]/presets/route";
 import { POST as presetsSyncPOST } from "@/app/api/groups/[groupId]/presets/sync/route";
+import { GET as adminUsersGET } from "@/app/api/admin/users/route";
+import { POST as adminResetPOST } from "@/app/api/admin/users/[userId]/reset-password/route";
 import { GET as settlementGET } from "@/app/api/groups/[groupId]/settlement/route";
 import { POST as joinPOST } from "@/app/api/groups/join/route";
 import { GET as groupsGET, POST as groupsPOST } from "@/app/api/groups/route";
@@ -128,6 +132,9 @@ const h = {
   log: (c: Client, groupId: string, query = "") =>
     call(c, logGET, { params: { groupId }, path: `/api/x${query}` }),
   settlement: (c: Client, groupId: string) => call(c, settlementGET, { params: { groupId } }),
+  adminUsers: (c: Client) => call(c, adminUsersGET, { path: "/api/admin/users" }),
+  resetPassword: (c: Client, userId: string, body: unknown = {}) =>
+    call(c, adminResetPOST, { method: "POST", params: { userId }, body }),
   presets: (c: Client, groupId: string) => call(c, presetsGET, { params: { groupId } }),
   createPreset: (c: Client, groupId: string, body: unknown) =>
     call(c, presetsPOST, { method: "POST", params: { groupId }, body }),
@@ -1214,5 +1221,147 @@ describe("presets", () => {
       expect(res.status).toBe(400);
       expect(count("SELECT COUNT(*) AS c FROM expense_presets WHERE group_id = ?", gid)).toBe(60);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------- admin
+
+describe("admin account", () => {
+  const ADMIN_PASSWORD = "Adm1n-passw0rd-long";
+
+  /** What an operator does out of band: build the SQL with the script and run it. */
+  async function createAdmin(username = "admin") {
+    testDb.raw.exec(await buildAdminSql({ username, password: ADMIN_PASSWORD }));
+    const admin = new Client();
+    const res = await h.login(admin, { username, password: ADMIN_PASSWORD });
+    return { admin, res };
+  }
+
+  async function aliceAndAdmin() {
+    const alice = new Client();
+    const reg = await h.register(alice, { username: "alice", displayName: "Alice", password: "secret1" });
+    const { admin } = await createAdmin();
+    return { alice, admin, aliceId: reg.json.data.user.id as string };
+  }
+
+  it("is created by the script, logs in with role admin, and registration cannot make one", async () => {
+    const { res } = await createAdmin();
+    expect(res.status).toBe(200);
+    expect(res.json.data.user).toMatchObject({ username: "admin", role: "admin" });
+
+    const reg = await h.register(new Client(), { username: "bob", displayName: "Bob", password: "secret2" });
+    expect(reg.json.data.user.role).toBe("user");
+
+    // Nobody can register a name that reads as the admin account.
+    for (const username of ["admin", "Administrator", "quantri", "root"]) {
+      const res2 = await h.register(new Client(), { username, displayName: "x", password: "secret3" });
+      expect(res2.status, username).toBe(400);
+    }
+  });
+
+  it("script SQL rotates only the admin's password and never takes over a normal user", async () => {
+    await createAdmin();
+    const first = testDb.raw.prepare("SELECT password_hash FROM users WHERE username = 'admin'").get() as {
+      password_hash: string;
+    };
+
+    testDb.raw.exec(await buildAdminSql({ username: "admin", password: "Another-long-pass-9" }));
+    const row = testDb.raw
+      .prepare("SELECT password_hash, password_salt, role FROM users WHERE username = 'admin'")
+      .get() as { password_hash: string; password_salt: string; role: string };
+    expect(row.password_hash).not.toBe(first.password_hash);
+    expect(row.role).toBe("admin");
+    expect(await verifyPassword("Another-long-pass-9", row.password_hash, row.password_salt)).toBe(true);
+    expect(count("SELECT COUNT(*) AS c FROM users WHERE role = 'admin'")).toBe(1);
+
+    // A normal user already holds the name: the statement changes nothing.
+    await h.register(new Client(), { username: "taken", displayName: "Taken", password: "secret1" });
+    const before = testDb.raw.prepare("SELECT password_hash, role FROM users WHERE username = 'taken'").get();
+    testDb.raw.exec(await buildAdminSql({ username: "taken", password: ADMIN_PASSWORD }));
+    expect(testDb.raw.prepare("SELECT password_hash, role FROM users WHERE username = 'taken'").get()).toEqual(
+      before,
+    );
+  });
+
+  it("refuses a short admin password", async () => {
+    await expect(buildAdminSql({ username: "admin", password: "short" })).rejects.toThrow();
+  });
+
+  it("lists plain users only, with no secrets, and only to the admin", async () => {
+    const { alice, admin } = await aliceAndAdmin();
+
+    expect((await h.adminUsers(alice)).status).toBe(403);
+    expect((await h.adminUsers(new Client())).status).toBe(401);
+
+    const res = await h.adminUsers(admin);
+    expect(res.status).toBe(200);
+    expect(res.json.data.users.map((u: Json) => u.username)).toEqual(["alice"]);
+    expect(Object.keys(res.json.data.users[0]).sort()).toEqual(["createdAt", "displayName", "id", "username"]);
+    expect(JSON.stringify(res.json)).not.toMatch(/hash|salt|PBKDF|role/i);
+  });
+
+  it("re-issues a generated password: old one dies, new one works, sessions end, audit row written", async () => {
+    const { alice, admin, aliceId } = await aliceAndAdmin();
+    const otherDevice = new Client();
+    await h.login(otherDevice, { username: "alice", password: "secret1" });
+    expect((await h.me(otherDevice)).status).toBe(200);
+
+    const res = await h.resetPassword(admin, aliceId);
+    expect(res.status).toBe(200);
+    expect(res.json.data).toMatchObject({ generated: true, user: { username: "alice" } });
+    const fresh = res.json.data.password as string;
+    expect(fresh).toHaveLength(12);
+
+    // Sessions on every device are gone; the old password no longer logs in.
+    expect((await h.me(alice)).status).toBe(401);
+    expect((await h.me(otherDevice)).status).toBe(401);
+    expect((await h.login(new Client(), { username: "alice", password: "secret1" })).status).toBe(401);
+    expect((await h.login(new Client(), { username: "alice", password: fresh })).status).toBe(200);
+
+    const audit = testDb.raw.prepare("SELECT * FROM admin_audit").all() as Array<Record<string, unknown>>;
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ target_user_id: aliceId, action: "password.reset" });
+    expect(JSON.stringify(audit)).not.toContain(fresh);
+  });
+
+  it("accepts a password chosen by the admin and validates it", async () => {
+    const { admin, aliceId } = await aliceAndAdmin();
+
+    expect((await h.resetPassword(admin, aliceId, { password: "12345" })).status).toBe(400);
+    const res = await h.resetPassword(admin, aliceId, { password: "my own pass" });
+    expect(res.json.data).toMatchObject({ generated: false, password: "my own pass" });
+    expect((await h.login(new Client(), { username: "alice", password: "my own pass" })).status).toBe(200);
+  });
+
+  it("refuses non-admins, unknown ids, and resetting the admin itself", async () => {
+    const { alice, admin, aliceId } = await aliceAndAdmin();
+    const bob = new Client();
+    const bobId = (await h.register(bob, { username: "bob", displayName: "Bob", password: "secret2" })).json.data
+      .user.id;
+
+    // A normal user cannot reset anyone, including themselves or others.
+    expect((await h.resetPassword(alice, bobId)).status).toBe(403);
+    expect((await h.resetPassword(alice, aliceId)).status).toBe(403);
+    expect((await h.resetPassword(new Client(), bobId)).status).toBe(401);
+    // bob is untouched.
+    expect((await h.login(new Client(), { username: "bob", password: "secret2" })).status).toBe(200);
+
+    expect((await h.resetPassword(admin, "missing")).status).toBe(404);
+    const adminId = (testDb.raw.prepare("SELECT id FROM users WHERE role = 'admin'").get() as { id: string }).id;
+    expect((await h.resetPassword(admin, adminId)).status).toBe(403);
+  });
+
+  it("keeps the admin out of groups", async () => {
+    const { alice, admin } = await aliceAndAdmin();
+    const group = (await h.createGroup(alice, "Nhóm")).json.data.group;
+
+    expect((await h.listGroups(admin)).status).toBe(403);
+    expect((await h.createGroup(admin, "Nhóm admin")).status).toBe(403);
+    expect((await h.join(admin, group.inviteCode)).status).toBe(403);
+    expect((await h.members(admin, group.id)).status).toBe(403);
+
+    // And cannot be pulled in by username either.
+    const added = await h.addMember(alice, group.id, { username: "admin" });
+    expect(added.status).toBe(404);
   });
 });

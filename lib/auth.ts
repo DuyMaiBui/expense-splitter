@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 
 import { getDb, newId, nowIso } from "./db";
 import { forbidden, notFound, unauthorized } from "./errors";
-import type { User } from "./types";
+import type { User, UserRole } from "./types";
 
 /**
  * Authentication: password hashing, session lifecycle and the request auth guards.
@@ -197,6 +197,7 @@ interface UserRow {
   id: string;
   username: string;
   display_name: string;
+  role: UserRole;
   created_at: string;
   expires_at: string;
 }
@@ -206,6 +207,7 @@ function toUser(row: UserRow): User {
     id: row.id,
     username: row.username,
     displayName: row.display_name,
+    role: row.role,
     createdAt: row.created_at,
   };
 }
@@ -231,7 +233,7 @@ export async function getCurrentUser(): Promise<User | null> {
   const row = await getDb()
     .prepare(
       `SELECT u.id AS id, u.username AS username, u.display_name AS display_name,
-              u.created_at AS created_at, s.expires_at AS expires_at
+              u.role AS role, u.created_at AS created_at, s.expires_at AS expires_at
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.id = ? AND s.expires_at > ?`,
@@ -255,6 +257,31 @@ export async function requireUser(): Promise<User> {
     throw unauthorized();
   }
   return user;
+}
+
+/** 403 unless the caller is the dedicated admin account. */
+export async function requireAdmin(): Promise<User> {
+  const user = await requireUser();
+  if (user.role !== "admin") {
+    throw forbidden("Chỉ tài khoản quản trị mới dùng được chức năng này.");
+  }
+  return user;
+}
+
+/** Groups belong to people: the admin account is kept out of creating or joining them. */
+export function rejectAdmin(user: User): void {
+  if (user.role === "admin") {
+    throw forbidden("Tài khoản quản trị chỉ dùng để cấp lại mật khẩu, không dùng nhóm chi tiêu.");
+  }
+}
+
+/** Drops this isolate's cached sessions of a user (after a password re-issue). */
+export function forgetUserSessions(userId: string): void {
+  for (const [id, entry] of sessionCache) {
+    if (entry.user.id === userId) {
+      sessionCache.delete(id);
+    }
+  }
 }
 
 /** The caller's own active member row in a group. */

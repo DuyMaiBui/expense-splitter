@@ -66,6 +66,24 @@ như bình thường. Trang **Mục mẫu** cho thêm, sửa, xóa và **đồng
 gia (mục trùng tên được giữ nguyên, tùy chọn cập nhật giá). Bảng `expense_presets` nằm trong
 `migrations/0003_presets.sql`.
 
+## Tài khoản quản trị (cấp lại mật khẩu)
+
+Có một tài khoản admin duy nhất, chỉ để cấp lại mật khẩu cho người dùng (không tạo hay tham gia
+nhóm). Đăng nhập ở trang đăng nhập bình thường, hệ thống tự chuyển sang `/admin`: tìm người dùng,
+bấm **Cấp lại**, để trống ô mật khẩu để tạo ngẫu nhiên hoặc tự nhập. Mật khẩu mới chỉ hiện một lần;
+mọi phiên đăng nhập cũ của người đó bị đăng xuất; mỗi lần cấp được ghi vào bảng `admin_audit`.
+
+Tài khoản admin **không** tạo được qua đăng ký. Tạo (hoặc đổi mật khẩu) bằng script cục bộ, script
+chỉ ghi file SQL, bạn tự áp lên D1:
+
+```bash
+node scripts/create-admin.mjs --out admin.sql --password-out admin-password.txt
+# hoặc tự chọn mật khẩu (>= 12 ký tự): ADMIN_PASSWORD='...' node scripts/create-admin.mjs --out admin.sql
+```
+
+Chạy lại script với cùng tên đăng nhập là đổi mật khẩu admin; nó không bao giờ ghi đè một tài khoản
+người dùng thường trùng tên. Giữ file mật khẩu ngoài repo và xóa sau khi lưu vào trình quản lý mật khẩu.
+
 ## Giới hạn Cloudflare Free và cách app tiết kiệm
 
 Gói Free tính **theo ngày**, reset lúc 00:00 UTC (7 giờ sáng giờ Việt Nam), không có hạn mức tháng:

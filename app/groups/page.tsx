@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { Icon, IconButton } from "@/components/Icon";
-import { api } from "@/lib/api-client";
+import { api, ApiClientError } from "@/lib/api-client";
 import type { Group } from "@/lib/types";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
@@ -26,9 +26,13 @@ export default function GroupsPage() {
       setGroups(data.groups);
       setLoadError(null);
     } catch (e) {
+      if (e instanceof ApiClientError && e.code === "FORBIDDEN") {
+        router.replace("/admin"); // only the admin account is refused here
+        return;
+      }
       setLoadError(message(e, "Không tải được danh sách nhóm."));
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     void load();

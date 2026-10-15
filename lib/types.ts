@@ -3,8 +3,20 @@
  * See docs/CONTRACT.md for the authoritative specification these mirror.
  */
 
+/** `admin` is a dedicated account that only re-issues passwords; it never joins groups. */
+export type UserRole = "user" | "admin";
+
 /** A registered account. */
 export interface User {
+  id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  createdAt: string;
+}
+
+/** An account as listed to the admin: no role (only plain users are listed) and no secrets. */
+export interface AdminUser {
   id: string;
   username: string;
   displayName: string;

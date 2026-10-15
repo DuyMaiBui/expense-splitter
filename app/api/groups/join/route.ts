@@ -1,5 +1,5 @@
 import { logStatement } from "@/lib/activity";
-import { requireUser } from "@/lib/auth";
+import { rejectAdmin, requireUser } from "@/lib/auth";
 import { getDb, newId, nowIso } from "@/lib/db";
 import { internal, notFound } from "@/lib/errors";
 import { getGroupView } from "@/lib/group-queries";
@@ -13,6 +13,7 @@ interface ExistingRow {
 
 export const POST = route(async (req) => {
   const user = await requireUser();
+  rejectAdmin(user);
   const { inviteCode } = await readJson(req, (raw) => ({
     inviteCode: str(obj(raw, "body").inviteCode, "inviteCode", { min: 1, max: 32 }).toUpperCase(),
   }));

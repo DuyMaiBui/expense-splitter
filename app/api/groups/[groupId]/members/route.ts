@@ -53,7 +53,7 @@ export const POST = route(async (req, ctx) => {
     name = input.name;
   } else {
     const target = await db
-      .prepare("SELECT id, display_name FROM users WHERE username = ?")
+      .prepare("SELECT id, display_name FROM users WHERE username = ? AND role = 'user'")
       .bind(input.username)
       .first<{ id: string; display_name: string }>();
     if (!target) {

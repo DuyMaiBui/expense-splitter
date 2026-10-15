@@ -2,7 +2,7 @@ import { createSession, hashPassword, verifyPassword } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { unauthorized } from "@/lib/errors";
 import { ok, readJson, route } from "@/lib/http";
-import type { User } from "@/lib/types";
+import type { User, UserRole } from "@/lib/types";
 import { obj, str } from "@/lib/validate";
 
 interface LoginRow {
@@ -11,6 +11,7 @@ interface LoginRow {
   display_name: string;
   password_hash: string;
   password_salt: string;
+  role: UserRole;
   created_at: string;
 }
 
@@ -25,7 +26,7 @@ export const POST = route(async (req) => {
 
   const row = await getDb()
     .prepare(
-      `SELECT id, username, display_name, password_hash, password_salt, created_at
+      `SELECT id, username, display_name, password_hash, password_salt, role, created_at
        FROM users WHERE username = ?`,
     )
     .bind(body.username)
@@ -49,6 +50,7 @@ export const POST = route(async (req) => {
     id: row.id,
     username: row.username,
     displayName: row.display_name,
+    role: row.role,
     createdAt: row.created_at,
   };
   return ok({ user });
