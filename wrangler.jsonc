@@ -20,10 +20,9 @@
     {
       "binding": "DB",
       "database_name": "expense-splitter",
-      // PLACEHOLDER — replace with the real id printed by:
-      //   npx wrangler d1 create expense-splitter
-      // `wrangler d1 ... --local` works with this placeholder; a remote deploy needs the real id.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // Real D1 database created in the Cloudflare dashboard (migrations/0001_init.sql applied via
+      // the D1 console). Local `next dev` ignores this id and uses a simulated database.
+      "database_id": "498037aa-01db-4b3f-9735-37635ecdd1f0",
       "migrations_dir": "migrations"
     }
   ]
