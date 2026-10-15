@@ -84,7 +84,7 @@ function toGroup(row: GroupRow): Group {
 /** The groups a user is an active member of, newest first. */
 export async function listGroupsForUser(db: D1Database, userId: string): Promise<Group[]> {
   const { results } = await db
-    .prepare(`${GROUP_SELECT} ORDER BY g.created_at DESC, g.id DESC`)
+    .prepare(`${GROUP_SELECT} WHERE g.deleted_at IS NULL ORDER BY g.created_at DESC, g.id DESC`)
     .bind(userId)
     .all<GroupRow>();
   return results.map(toGroup);
@@ -97,8 +97,25 @@ export async function getGroupView(
   userId: string,
 ): Promise<Group | null> {
   const row = await db
-    .prepare(`${GROUP_SELECT} WHERE g.id = ?`)
+    .prepare(`${GROUP_SELECT} WHERE g.id = ? AND g.deleted_at IS NULL`)
     .bind(userId, groupId)
+    .first<GroupRow>();
+  return row ? toGroup(row) : null;
+}
+
+/**
+ * One group as the admin sees it: no membership needed, deleted groups included.
+ * `myMemberId` is empty: the admin account is not a member (it acts as a built-in actor).
+ */
+export async function getGroupAdminView(db: D1Database, groupId: string): Promise<Group | null> {
+  const row = await db
+    .prepare(
+      `SELECT g.id AS id, g.name AS name, g.invite_code AS invite_code, g.created_at AS created_at,
+              '' AS my_member_id,
+              (SELECT COUNT(*) FROM group_members c WHERE c.group_id = g.id AND c.removed_at IS NULL) AS member_count
+       FROM groups g WHERE g.id = ?`,
+    )
+    .bind(groupId)
     .first<GroupRow>();
   return row ? toGroup(row) : null;
 }

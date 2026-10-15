@@ -82,7 +82,12 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
           setSpentAt(isoToLocalInput(expense.spentAt));
           setNote(expense.note ?? "");
         } else {
-          setPaidBy(groupData.group.myMemberId);
+          // The admin account has no member row: default the payer to the first active member.
+          setPaidBy(
+            groupData.group.myMemberId ||
+              groupData.members.find((m) => m.removedAt === null)?.id ||
+              "",
+          );
           setParticipants(
             new Set(groupData.members.filter((m) => m.removedAt === null).map((m) => m.id)),
           );

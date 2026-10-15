@@ -15,7 +15,7 @@ export function getDb(): D1Database {
  * A Workers Rate Limiting binding (declared under `ratelimits` in wrangler.jsonc), or
  * undefined where none is configured (local dev, tests, outside a request).
  */
-export function getRateLimiter(name: "RL_AUTH" | "RL_API"): RateLimit | undefined {
+export function getRateLimiter(name: "RL_AUTH" | "RL_API" | "RL_WRITE"): RateLimit | undefined {
   try {
     return getCloudflareContext().env[name];
   } catch {

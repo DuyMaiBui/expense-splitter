@@ -9,6 +9,10 @@ import { buildAdminSql } from "../scripts/create-admin.mjs";
 
 import { clearSessionCache, hashPassword, verifyPassword } from "@/lib/auth";
 import { loadExpenseList } from "@/lib/expenses";
+import { getGroupAdminView, getGroupView, listGroupsForUser } from "@/lib/group-queries";
+import { ABUSE, invalidateBanCache, isIpBanned, resetGuardState } from "@/lib/guard";
+import { MAX_BODY_BYTES } from "@/lib/http";
+import { normalizeIp } from "@/lib/ip";
 import { MEMORY_RULES, resetRateLimits } from "@/lib/rate-limit";
 
 import { POST as loginPOST } from "@/app/api/auth/login/route";
@@ -26,6 +30,17 @@ import { GET as presetsGET, POST as presetsPOST } from "@/app/api/groups/[groupI
 import { POST as presetsSyncPOST } from "@/app/api/groups/[groupId]/presets/sync/route";
 import { GET as adminUsersGET } from "@/app/api/admin/users/route";
 import { POST as adminResetPOST } from "@/app/api/admin/users/[userId]/reset-password/route";
+import { POST as adminBanPOST } from "@/app/api/admin/users/[userId]/ban/route";
+import { POST as adminUnbanPOST } from "@/app/api/admin/users/[userId]/unban/route";
+import {
+  DELETE as adminIpBansDELETE,
+  GET as adminIpBansGET,
+  POST as adminIpBansPOST,
+} from "@/app/api/admin/ip-bans/route";
+import { GET as adminGroupsGET } from "@/app/api/admin/groups/route";
+import { PUT as adminGroupPUT } from "@/app/api/admin/groups/[groupId]/route";
+import { POST as adminGroupDeletePOST } from "@/app/api/admin/groups/[groupId]/delete/route";
+import { POST as adminGroupRestorePOST } from "@/app/api/admin/groups/[groupId]/restore/route";
 import { GET as settlementGET } from "@/app/api/groups/[groupId]/settlement/route";
 import { POST as joinPOST } from "@/app/api/groups/join/route";
 import { GET as groupsGET, POST as groupsPOST } from "@/app/api/groups/route";
@@ -70,6 +85,7 @@ beforeEach(() => {
   testDb = createTestDb(MIGRATION);
   activeJar = new Map();
   resetRateLimits();
+  resetGuardState();
   clearSessionCache();
 });
 
@@ -135,6 +151,22 @@ const h = {
   adminUsers: (c: Client) => call(c, adminUsersGET, { path: "/api/admin/users" }),
   resetPassword: (c: Client, userId: string, body: unknown = {}) =>
     call(c, adminResetPOST, { method: "POST", params: { userId }, body }),
+  banUser: (c: Client, userId: string, body: unknown = {}) =>
+    call(c, adminBanPOST, { method: "POST", params: { userId }, body }),
+  unbanUser: (c: Client, userId: string) =>
+    call(c, adminUnbanPOST, { method: "POST", params: { userId }, body: {} }),
+  ipBans: (c: Client) => call(c, adminIpBansGET, { path: "/api/admin/ip-bans" }),
+  banIp: (c: Client, body: unknown, headers?: Record<string, string>) =>
+    call(c, adminIpBansPOST, { method: "POST", path: "/api/admin/ip-bans", body, headers }),
+  liftIp: (c: Client, ip: string) =>
+    call(c, adminIpBansDELETE, { method: "DELETE", path: `/api/admin/ip-bans?ip=${encodeURIComponent(ip)}` }),
+  adminGroups: (c: Client) => call(c, adminGroupsGET, { path: "/api/admin/groups" }),
+  renameGroup: (c: Client, groupId: string, name: string) =>
+    call(c, adminGroupPUT, { method: "PUT", params: { groupId }, body: { name } }),
+  deleteGroup: (c: Client, groupId: string) =>
+    call(c, adminGroupDeletePOST, { method: "POST", params: { groupId }, body: {} }),
+  restoreGroup: (c: Client, groupId: string) =>
+    call(c, adminGroupRestorePOST, { method: "POST", params: { groupId }, body: {} }),
   presets: (c: Client, groupId: string) => call(c, presetsGET, { params: { groupId } }),
   createPreset: (c: Client, groupId: string, body: unknown) =>
     call(c, presetsPOST, { method: "POST", params: { groupId }, body }),
@@ -909,6 +941,15 @@ describe("query efficiency", () => {
     expect(sessionReads()).toBe(1);
   });
 
+  it("remembers an unknown session token, so cookie spam costs one read", async () => {
+    const c = new Client();
+    c.jar.set("sid", "not-a-real-token");
+    expect((await h.me(c)).status).toBe(401);
+    expect((await h.me(c)).status).toBe(401);
+    expect((await h.me(c)).status).toBe(401);
+    expect(sessionReads()).toBe(1);
+  });
+
   it("logout takes effect immediately in the isolate that handled it", async () => {
     const c = new Client();
     await h.register(c, { username: "alice", displayName: "Alice", password: "secret1" });
@@ -1296,7 +1337,15 @@ describe("admin account", () => {
     const res = await h.adminUsers(admin);
     expect(res.status).toBe(200);
     expect(res.json.data.users.map((u: Json) => u.username)).toEqual(["alice"]);
-    expect(Object.keys(res.json.data.users[0]).sort()).toEqual(["createdAt", "displayName", "id", "username"]);
+    expect(Object.keys(res.json.data.users[0]).sort()).toEqual([
+      "banReason",
+      "bannedAt",
+      "createdAt",
+      "displayName",
+      "id",
+      "recentAbuse",
+      "username",
+    ]);
     expect(JSON.stringify(res.json)).not.toMatch(/hash|salt|PBKDF|role/i);
   });
 
@@ -1351,17 +1400,508 @@ describe("admin account", () => {
     expect((await h.resetPassword(admin, adminId)).status).toBe(403);
   });
 
-  it("keeps the admin out of groups", async () => {
+  it("cannot create or join groups, is never a listed member, and cannot be linked by username", async () => {
     const { alice, admin } = await aliceAndAdmin();
     const group = (await h.createGroup(alice, "Nhóm")).json.data.group;
 
     expect((await h.listGroups(admin)).status).toBe(403);
     expect((await h.createGroup(admin, "Nhóm admin")).status).toBe(403);
     expect((await h.join(admin, group.inviteCode)).status).toBe(403);
-    expect((await h.members(admin, group.id)).status).toBe(403);
 
-    // And cannot be pulled in by username either.
+    // Viewing is allowed (admin manages every group) but never makes it a member.
+    const members = await h.members(admin, group.id);
+    expect(members.status).toBe(200);
+    expect(members.json.data.members.map((m: Json) => m.name)).toEqual(["Alice"]);
+    expect(count("SELECT COUNT(*) AS c FROM group_members WHERE user_id IN (SELECT id FROM users WHERE role='admin')")).toBe(0);
+
     const added = await h.addMember(alice, group.id, { username: "admin" });
     expect(added.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------- abuse + admin power
+
+describe("admin management", () => {
+  const ADMIN_PASSWORD = "Adm1n-passw0rd-long";
+  const ip = (address: string) => ({ "cf-connecting-ip": address });
+
+  async function world() {
+    testDb.raw.exec(await buildAdminSql({ username: "admin", password: ADMIN_PASSWORD }));
+    const admin = new Client();
+    await h.login(admin, { username: "admin", password: ADMIN_PASSWORD });
+    const alice = new Client();
+    const bob = new Client();
+    const aliceId = (await h.register(alice, { username: "alice", displayName: "Alice", password: "secret1" })).json
+      .data.user.id as string;
+    const bobId = (await h.register(bob, { username: "bob", displayName: "Bob", password: "secret2" })).json.data
+      .user.id as string;
+    const group = (await h.createGroup(alice, "Đi Đà Lạt")).json.data.group;
+    const joined = (await h.join(bob, group.inviteCode)).json.data.group;
+    return {
+      admin,
+      alice,
+      bob,
+      aliceId,
+      bobId,
+      gid: group.id as string,
+      code: group.inviteCode as string,
+      aliceM: group.myMemberId as string,
+      bobM: joined.myMemberId as string,
+    };
+  }
+
+  /** A signed-in account whose requests carry `address` and a `sid` cookie header. */
+  async function accountAt(username: string, address: string) {
+    const c = new Client();
+    await call(c, registerPOST, {
+      method: "POST",
+      body: { username, displayName: username, password: "secret1" },
+      headers: ip(address),
+    });
+    expect(c.jar.get("sid"), `${username} must be signed in`).toBeTruthy();
+    const headers = { ...ip(address), cookie: `sid=${c.jar.get("sid")}` };
+    return { c, headers };
+  }
+
+  /** Fire more writes than one session may make in a window. */
+  async function flood(account: { c: Client; headers: Record<string, string> }) {
+    let last = 0;
+    for (let i = 0; i <= MEMORY_RULES.write.limit; i += 1) {
+      const r = await call(account.c, groupsPOST, {
+        method: "POST",
+        body: { name: `g${i}` },
+        headers: account.headers,
+      });
+      last = r.status;
+    }
+    return last;
+  }
+
+  // ----------------------------------------------------------------- account bans
+
+  describe("account bans", () => {
+    it("ban signs the user out at once, refuses login, keeps their data, and unban restores it", async () => {
+      const w = await world();
+
+      const res = await h.banUser(w.admin, w.aliceId, { reason: "spam" });
+      expect(res.status).toBe(200);
+
+      expect((await h.me(w.alice)).status).toBe(401);
+      expect(count("SELECT COUNT(*) AS c FROM sessions WHERE user_id = ?", w.aliceId)).toBe(0);
+
+      // Right password: told they are banned. Wrong password: the same answer as any stranger.
+      const right = await h.login(new Client(), { username: "alice", password: "secret1" });
+      expect(right.status).toBe(403);
+      expect(right.json.error.message).toMatch(/khóa/);
+      expect((await h.login(new Client(), { username: "alice", password: "nope-nope" })).status).toBe(401);
+
+      // Data stays: the group and the member row are still there.
+      expect(count("SELECT COUNT(*) AS c FROM groups WHERE id = ?", w.gid)).toBe(1);
+      expect(count("SELECT COUNT(*) AS c FROM group_members WHERE user_id = ?", w.aliceId)).toBe(1);
+
+      const listed = (await h.adminUsers(w.admin)).json.data.users.find((u: Json) => u.id === w.aliceId);
+      expect(listed).toMatchObject({ banReason: "spam" });
+      expect(listed.bannedAt).toEqual(expect.any(String));
+
+      expect((await h.unbanUser(w.admin, w.aliceId)).status).toBe(200);
+      expect((await h.login(new Client(), { username: "alice", password: "secret1" })).status).toBe(200);
+
+      const actions = (testDb.raw.prepare("SELECT action FROM admin_audit ORDER BY id").all() as Array<{ action: string }>)
+        .map((r) => r.action);
+      expect(actions).toEqual(["user.ban", "user.unban"]);
+    });
+
+    it("only the admin may ban, never the admin account, and unknown ids are 404", async () => {
+      const w = await world();
+      const adminId = (testDb.raw.prepare("SELECT id FROM users WHERE role='admin'").get() as { id: string }).id;
+
+      expect((await h.banUser(w.alice, w.bobId)).status).toBe(403);
+      expect((await h.banUser(new Client(), w.bobId)).status).toBe(401);
+      expect((await h.banUser(w.admin, adminId)).status).toBe(403);
+      expect((await h.banUser(w.admin, "missing")).status).toBe(404);
+      expect((await h.unbanUser(w.admin, "missing")).status).toBe(404);
+      expect((await h.banUser(w.admin, w.bobId, { reason: "x".repeat(201) })).status).toBe(400);
+
+      // bob is untouched by every refused attempt.
+      expect((await h.me(w.bob)).status).toBe(200);
+    });
+
+    it("a banned account that already holds a session id cannot use it again", async () => {
+      const w = await world();
+      const token = w.alice.jar.get("sid") as string;
+      await h.banUser(w.admin, w.aliceId);
+
+      // Even a session row that somehow survived must not authenticate a banned account.
+      testDb.raw
+        .prepare("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+        .run(
+          Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token))), (b) =>
+            b.toString(16).padStart(2, "0"),
+          ).join(""),
+          w.aliceId,
+          new Date(Date.now() + 86_400_000).toISOString(),
+          new Date().toISOString(),
+        );
+      clearSessionCache();
+      const c = new Client();
+      c.jar.set("sid", token);
+      expect((await h.me(c)).status).toBe(401);
+    });
+  });
+
+  // ------------------------------------------------------------------- IP bans
+
+  describe("IP bans", () => {
+    it("a banned address gets 403 on the API, others are unaffected, and lifting restores it", async () => {
+      const w = await world();
+
+      const res = await h.banIp(w.admin, { ip: "203.0.113.9", reason: "abuse", hours: 24 });
+      expect(res.status).toBe(201);
+
+      const c = new Client();
+      const blocked = await call(c, meGET, { headers: ip("203.0.113.9") });
+      expect(blocked.status).toBe(403);
+      expect(blocked.json.error.message).toMatch(/IP/);
+      // Login and registration are API routes too: a banned address cannot start over.
+      expect((await call(c, loginPOST, { method: "POST", body: { username: "a", password: "bbbbbb" }, headers: ip("203.0.113.9") })).status).toBe(403);
+      expect((await call(c, meGET, { headers: ip("198.51.100.1") })).status).toBe(401);
+
+      expect((await h.liftIp(w.admin, "203.0.113.9")).status).toBe(200);
+      expect((await call(c, meGET, { headers: ip("203.0.113.9") })).status).toBe(401);
+    });
+
+    it("a banned address can still reach the admin routes, so the admin can never be locked out", async () => {
+      const w = await world();
+      await h.banIp(w.admin, { ip: "203.0.113.9" });
+
+      const list = await call(w.admin, adminIpBansGET, { headers: ip("203.0.113.9") });
+      expect(list.status).toBe(200);
+      expect(list.json.data.bans.map((b: Json) => b.ip)).toEqual(["203.0.113.9"]);
+    });
+
+    it("refuses to ban the address the admin is using, bad addresses, and non-admins", async () => {
+      const w = await world();
+
+      expect((await h.banIp(w.admin, { ip: "203.0.113.9" }, ip("203.0.113.9"))).status).toBe(400);
+      expect((await h.banIp(w.admin, { ip: "not an ip" })).status).toBe(400);
+      expect((await h.banIp(w.admin, { ip: "300.1.1.1" })).status).toBe(400);
+      expect((await h.banIp(w.admin, { ip: "1.2.3.4", hours: 0 })).status).toBe(400);
+      expect((await h.banIp(w.alice, { ip: "1.2.3.4" })).status).toBe(403);
+      expect((await h.ipBans(w.alice)).status).toBe(403);
+      expect((await h.liftIp(w.alice, "1.2.3.4")).status).toBe(403);
+      expect(count("SELECT COUNT(*) AS c FROM ip_bans")).toBe(0);
+    });
+
+    it("a timed ban expires on its own and a permanent ban has no end", async () => {
+      const w = await world();
+      await h.banIp(w.admin, { ip: "203.0.113.9", hours: 1 });
+      await h.banIp(w.admin, { ip: "203.0.113.10" }); // permanent
+
+      const rows = testDb.raw.prepare("SELECT ip, expires_at FROM ip_bans ORDER BY ip").all() as Array<{
+        ip: string;
+        expires_at: string | null;
+      }>;
+      const byIp = Object.fromEntries(rows.map((r) => [r.ip, r.expires_at]));
+      expect(byIp["203.0.113.9"]).toEqual(expect.any(String));
+      expect(byIp["203.0.113.10"]).toBeNull();
+
+      // Move the clock past the first ban's end: only the permanent one still applies.
+      invalidateBanCache();
+      const later = Date.now() + 2 * 60 * 60_000;
+      expect(await isIpBanned("203.0.113.9", later)).toBe(false);
+      invalidateBanCache();
+      expect(await isIpBanned("203.0.113.10", later)).toBe(true);
+    });
+
+    it("is never applied to an unknown address, and fails open when the table is unreadable", async () => {
+      const w = await world();
+      await h.banIp(w.admin, { ip: "203.0.113.9" });
+      expect(await isIpBanned("unknown")).toBe(false);
+
+      resetGuardState();
+      testDb.raw.exec("DROP TABLE ip_bans");
+      expect(await isIpBanned("203.0.113.9")).toBe(false);
+      // The API keeps working before the migration is applied.
+      expect((await call(new Client(), meGET, { headers: ip("203.0.113.9") })).status).toBe(401);
+    });
+
+    it("normalises addresses so one spelling cannot slip past a ban", () => {
+      expect(normalizeIp(" 203.0.113.9 ")).toBe("203.0.113.9");
+      expect(normalizeIp("2001:DB8:0:0:0:0:0:1")).toBe("2001:db8::1");
+      expect(normalizeIp("999.1.1.1")).toBeNull();
+      expect(normalizeIp("example.com")).toBeNull();
+      expect(normalizeIp("")).toBeNull();
+    });
+  });
+
+  // ----------------------------------------------------------------- spam guard
+
+  describe("spam guard", () => {
+    it("rejects the write that exceeds a session's budget with 429", async () => {
+      await world();
+      const a = await accountAt("spammer", "203.0.113.20");
+      expect(await flood(a)).toBe(429);
+    });
+
+    it("budgets writes per session: a shared address does not pool its users' budgets", async () => {
+      await world();
+      const a = await accountAt("one", "203.0.113.21");
+      const b = await accountAt("two", "203.0.113.21");
+      for (let i = 0; i < MEMORY_RULES.write.limit; i += 1) {
+        expect((await call(a.c, groupsPOST, { method: "POST", body: { name: `a${i}` }, headers: a.headers })).status).toBe(201);
+      }
+      const other = await call(b.c, groupsPOST, { method: "POST", body: { name: "b" }, headers: b.headers });
+      expect(other.status).toBe(201);
+    });
+
+    it("reads are never budgeted as writes", async () => {
+      await world();
+      const a = await accountAt("reader", "203.0.113.22");
+      for (let i = 0; i < MEMORY_RULES.write.limit + 5; i += 1) {
+        expect((await call(a.c, groupsGET, { headers: a.headers })).status).toBe(200);
+      }
+    });
+
+    it("bans the address once 3 different accounts spam from it, and only flags the accounts", async () => {
+      const w = await world();
+      const accounts = [
+        await accountAt("spam_one", "203.0.113.30"),
+        await accountAt("spam_two", "203.0.113.30"),
+        await accountAt("spam_three", "203.0.113.30"),
+      ];
+
+      await flood(accounts[0]);
+      await flood(accounts[1]);
+      expect(count("SELECT COUNT(*) AS c FROM ip_bans")).toBe(0); // 2 accounts: not enough
+
+      await flood(accounts[2]);
+      const ban = testDb.raw.prepare("SELECT * FROM ip_bans").get() as Record<string, string | null>;
+      expect(ban).toMatchObject({ ip: "203.0.113.30", source: "auto", created_by: null });
+      const hours = (Date.parse(ban.expires_at as string) - Date.now()) / 3_600_000;
+      expect(hours).toBeGreaterThan(23.9);
+      expect(hours).toBeLessThanOrEqual(ABUSE.autoBanMs / 3_600_000);
+
+      // The address is now refused...
+      expect((await call(new Client(), meGET, { headers: ip("203.0.113.30") })).status).toBe(403);
+      // ...but the accounts themselves are not banned, only flagged for the admin.
+      expect(count("SELECT COUNT(*) AS c FROM users WHERE banned_at IS NOT NULL")).toBe(0);
+      const users = (await h.adminUsers(w.admin)).json.data.users as Json[];
+      for (const name of ["spam_one", "spam_two", "spam_three"]) {
+        expect(users.find((u) => u.username === name).recentAbuse).toBe(1);
+      }
+      // And the admin sees it, can lift it early.
+      const list = (await h.ipBans(w.admin)).json.data.bans as Json[];
+      expect(list.map((b) => [b.ip, b.source])).toEqual([["203.0.113.30", "auto"]]);
+      expect((await h.liftIp(w.admin, "203.0.113.30")).status).toBe(200);
+      expect((await call(new Client(), meGET, { headers: ip("203.0.113.30") })).status).toBe(401);
+    });
+
+    it("records one event per account per window, however long the flood goes on", async () => {
+      await world();
+      const a = await accountAt("loud", "203.0.113.31");
+      await flood(a);
+      await flood(a);
+      await flood(a);
+      expect(count("SELECT COUNT(*) AS c FROM abuse_events")).toBe(1);
+    });
+
+    it("lists a spamming address as a suspect until it is banned, and a banned one drops out", async () => {
+      const w = await world();
+      await flood(await accountAt("spam_one", "203.0.113.32"));
+
+      const suspects = (await h.ipBans(w.admin)).json.data.suspects as Json[];
+      expect(suspects).toHaveLength(1);
+      expect(suspects[0]).toMatchObject({ ip: "203.0.113.32", accounts: 1, events: 1 });
+
+      await h.banIp(w.admin, { ip: "203.0.113.32", hours: 24 });
+      expect((await h.ipBans(w.admin)).json.data.suspects).toEqual([]);
+    });
+
+    it("caps sign-ups per address per day without touching other addresses", async () => {
+      for (let i = 0; i < ABUSE.registrationsPerDay; i += 1) {
+        const r = await call(new Client(), registerPOST, {
+          method: "POST",
+          body: { username: `user${i}`, displayName: `U${i}`, password: "secret1" },
+          headers: ip("203.0.113.40"),
+        });
+        expect(r.status, `signup ${i}`).toBe(201);
+        resetRateLimits(); // isolate the daily cap from the per-minute login limiter
+      }
+
+      const over = await call(new Client(), registerPOST, {
+        method: "POST",
+        body: { username: "one_too_many", displayName: "X", password: "secret1" },
+        headers: ip("203.0.113.40"),
+      });
+      expect(over.status).toBe(429);
+      expect(over.json.error.message).toMatch(/quá nhiều tài khoản/);
+
+      const other = await call(new Client(), registerPOST, {
+        method: "POST",
+        body: { username: "elsewhere", displayName: "X", password: "secret1" },
+        headers: ip("203.0.113.41"),
+      });
+      expect(other.status).toBe(201);
+    });
+
+    it("rejects an oversized JSON body before parsing it", async () => {
+      const w = await world();
+      const huge = await call(w.alice, groupsPOST, {
+        method: "POST",
+        body: { name: "x".repeat(MAX_BODY_BYTES + 1) },
+      });
+      expect(huge.status).toBe(400);
+      expect(huge.json.error.message).toMatch(/quá lớn/);
+
+      const declared = await call(w.alice, groupsPOST, {
+        method: "POST",
+        body: { name: "ok" },
+        headers: { "content-length": String(MAX_BODY_BYTES + 1) },
+      });
+      expect(declared.status).toBe(400);
+
+      expect((await h.createGroup(w.alice, "Bình thường")).status).toBe(201);
+    });
+  });
+
+  // ------------------------------------------------------------ group management
+
+  describe("group management", () => {
+    it("lists every group with counts, deleted ones included, to the admin only", async () => {
+      const w = await world();
+      await h.createExpense(w.alice, w.gid, {
+        title: "Ăn tối",
+        amount: 90000,
+        paidByMemberId: w.aliceM,
+        participantMemberIds: [w.aliceM, w.bobM],
+      });
+      await h.deleteGroup(w.admin, w.gid);
+
+      expect((await h.adminGroups(w.alice)).status).toBe(403);
+      const res = await h.adminGroups(w.admin);
+      expect(res.status).toBe(200);
+      expect(res.json.data.groups).toHaveLength(1);
+      expect(res.json.data.groups[0]).toMatchObject({
+        id: w.gid,
+        name: "Đi Đà Lạt",
+        memberCount: 2,
+        expenseCount: 1,
+        deletedAt: expect.any(String),
+      });
+    });
+
+    it("soft delete hides the group from members and join codes, restore brings it all back", async () => {
+      const w = await world();
+      await h.createExpense(w.alice, w.gid, {
+        title: "Ăn tối",
+        amount: 90000,
+        paidByMemberId: w.aliceM,
+        participantMemberIds: [w.aliceM, w.bobM],
+      });
+
+      expect((await h.deleteGroup(w.admin, w.gid)).status).toBe(200);
+
+      expect((await h.listGroups(w.alice)).json.data.groups).toEqual([]);
+      expect((await h.getGroup(w.alice, w.gid)).status).toBe(404);
+      expect((await h.expenses(w.alice, w.gid)).status).toBe(404);
+      expect((await h.join(new Client().jar.size ? w.bob : w.bob, w.code)).status).toBe(404);
+      // Nothing is erased.
+      expect(count("SELECT COUNT(*) AS c FROM expenses WHERE group_id = ?", w.gid)).toBe(1);
+      // The admin can still open it.
+      expect((await h.getGroup(w.admin, w.gid)).status).toBe(200);
+
+      expect((await h.restoreGroup(w.admin, w.gid)).status).toBe(200);
+      expect((await h.listGroups(w.alice)).json.data.groups.map((g: Json) => g.name)).toEqual(["Đi Đà Lạt"]);
+      expect((await h.expenses(w.alice, w.gid)).json.data.expenses).toHaveLength(1);
+    });
+
+    it("query helpers hide a deleted group from members but not from the admin view", async () => {
+      const w = await world();
+      await h.deleteGroup(w.admin, w.gid);
+
+      expect(await getGroupView(testDb.d1, w.gid, w.aliceId)).toBeNull();
+      expect(await listGroupsForUser(testDb.d1, w.aliceId)).toEqual([]);
+      expect(await getGroupAdminView(testDb.d1, w.gid)).toMatchObject({ id: w.gid, myMemberId: "" });
+    });
+
+    it("is idempotent, logs under the admin identity once, and refuses non-admins", async () => {
+      const w = await world();
+
+      expect((await h.deleteGroup(w.alice, w.gid)).status).toBe(403);
+      expect((await h.restoreGroup(w.alice, w.gid)).status).toBe(403);
+      expect((await h.renameGroup(w.alice, w.gid, "Hack")).status).toBe(403);
+      expect((await h.deleteGroup(w.admin, "missing")).status).toBe(404);
+
+      await h.deleteGroup(w.admin, w.gid);
+      await h.deleteGroup(w.admin, w.gid); // again: no second row
+      await h.restoreGroup(w.admin, w.gid);
+      await h.restoreGroup(w.admin, w.gid);
+
+      const log = (await h.log(w.alice, w.gid)).json.data.entries as Json[];
+      const admin = log.filter((e) => e.actorName === "Quản trị viên");
+      expect(admin.map((e) => e.action).sort()).toEqual(["group.delete", "group.restore"]);
+      expect(admin[0].summary).toMatch(/Quản trị viên đã/);
+    });
+
+    it("rename validates the name and is logged with before and after", async () => {
+      const w = await world();
+
+      expect((await h.renameGroup(w.admin, w.gid, "")).status).toBe(400);
+      expect((await h.renameGroup(w.admin, w.gid, "x".repeat(61))).status).toBe(400);
+
+      const res = await h.renameGroup(w.admin, w.gid, "Phú Quốc");
+      expect(res.status).toBe(200);
+      expect((await h.getGroup(w.alice, w.gid)).json.data.group.name).toBe("Phú Quốc");
+
+      const entry = ((await h.log(w.alice, w.gid)).json.data.entries as Json[]).find(
+        (e) => e.action === "group.rename",
+      );
+      expect(entry.detail).toEqual({ before: { name: "Đi Đà Lạt" }, after: { name: "Phú Quốc" } });
+    });
+
+    it("the admin can add, edit and delete expenses, members and presets, all logged as Quản trị viên", async () => {
+      const w = await world();
+
+      const created = await h.createExpense(w.admin, w.gid, {
+        title: "Taxi",
+        amount: 100000,
+        paidByMemberId: w.aliceM,
+        participantMemberIds: [w.aliceM, w.bobM],
+      });
+      expect(created.status).toBe(201);
+      const eid = created.json.data.expense.id as string;
+
+      expect(
+        (
+          await h.updateExpense(w.admin, w.gid, eid, {
+            title: "Taxi sân bay",
+            amount: 120000,
+            paidByMemberId: w.bobM,
+            participantMemberIds: [w.aliceM, w.bobM],
+          })
+        ).status,
+      ).toBe(200);
+
+      const friend = await h.addMember(w.admin, w.gid, { name: "Chi" });
+      expect(friend.status).toBe(201);
+      expect((await h.createPreset(w.admin, w.gid, { name: "Cầu lông", unitPrice: 29000 })).status).toBe(201);
+      expect((await h.deleteExpense(w.admin, w.gid, eid)).status).toBe(200);
+
+      const entries = (await h.log(w.alice, w.gid)).json.data.entries as Json[];
+      const byAdmin = entries.filter((e) => e.actorName === "Quản trị viên").map((e) => e.action).sort();
+      expect(byAdmin).toEqual(["expense.create", "expense.delete", "expense.update", "member.add", "preset.create"]);
+
+      // Settlement still computes for the edited data.
+      expect((await h.settlement(w.alice, w.gid)).status).toBe(200);
+    });
+
+    it("the admin cannot remove its own (virtual) member, and members cannot see an admin member", async () => {
+      const w = await world();
+      const members = (await h.members(w.alice, w.gid)).json.data.members as Json[];
+      expect(members.map((m) => m.name).sort()).toEqual(["Alice", "Bob"]);
+      expect((await h.removeMember(w.admin, w.gid, w.bobM)).status).toBe(200);
+      expect(((await h.members(w.alice, w.gid)).json.data.members as Json[]).find((m) => m.id === w.bobM).removedAt)
+        .toEqual(expect.any(String));
+    });
   });
 });

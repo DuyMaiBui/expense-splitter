@@ -180,9 +180,18 @@ const SESSION_CACHE_TTL_MS = 30_000;
 const SESSION_CACHE_MAX = 500;
 const sessionCache = new Map<string, { user: User; until: number }>();
 
+/**
+ * Tokens that resolved to no session. An attacker sending random cookies would otherwise cost
+ * one D1 read per request; a token that does not exist cannot start existing, so remembering
+ * the miss for a minute is safe.
+ */
+const UNKNOWN_TOKEN_TTL_MS = 60_000;
+const unknownTokens = new Map<string, number>();
+
 /** Test hook: forget every cached session. */
 export function clearSessionCache(): void {
   sessionCache.clear();
+  unknownTokens.clear();
 }
 
 function cacheSession(id: string, user: User, expiresAt: string): void {
@@ -198,6 +207,7 @@ interface UserRow {
   username: string;
   display_name: string;
   role: UserRole;
+  banned_at: string | null;
   created_at: string;
   expires_at: string;
 }
@@ -222,6 +232,14 @@ export async function getCurrentUser(): Promise<User | null> {
 
   const id = await sha256Hex(token);
 
+  const unknownUntil = unknownTokens.get(id);
+  if (unknownUntil !== undefined) {
+    if (unknownUntil > Date.now()) {
+      return null;
+    }
+    unknownTokens.delete(id);
+  }
+
   const cached = sessionCache.get(id);
   if (cached) {
     if (cached.until > Date.now()) {
@@ -233,7 +251,7 @@ export async function getCurrentUser(): Promise<User | null> {
   const row = await getDb()
     .prepare(
       `SELECT u.id AS id, u.username AS username, u.display_name AS display_name,
-              u.role AS role, u.created_at AS created_at, s.expires_at AS expires_at
+              u.role AS role, u.banned_at AS banned_at, u.created_at AS created_at, s.expires_at AS expires_at
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.id = ? AND s.expires_at > ?`,
@@ -242,6 +260,15 @@ export async function getCurrentUser(): Promise<User | null> {
     .first<UserRow>();
 
   if (!row) {
+    if (unknownTokens.size >= SESSION_CACHE_MAX) {
+      unknownTokens.clear();
+    }
+    unknownTokens.set(id, Date.now() + UNKNOWN_TOKEN_TTL_MS);
+    return null;
+  }
+
+  // A banned account has no usable session even if a cached or racing one slipped through.
+  if (row.banned_at !== null) {
     return null;
   }
 
@@ -284,6 +311,9 @@ export function forgetUserSessions(userId: string): void {
   }
 }
 
+/** How the admin account appears in group logs and summaries. */
+export const ADMIN_ACTOR_NAME = "Quản trị viên";
+
 /** The caller's own active member row in a group. */
 export interface GroupMemberRef {
   id: string;
@@ -301,16 +331,31 @@ export async function requireGroupMember(groupId: string, user: User): Promise<G
   // active membership = FORBIDDEN. Both lookups are primary-key / unique-index probes.
   const row = await getDb()
     .prepare(
-      `SELECT g.id AS group_id, m.id AS member_id, m.name AS member_name
+      `SELECT g.id AS group_id, g.deleted_at AS deleted_at, m.id AS member_id, m.name AS member_name
        FROM groups g
        LEFT JOIN group_members m
          ON m.group_id = g.id AND m.user_id = ? AND m.removed_at IS NULL
        WHERE g.id = ?`,
     )
     .bind(user.id, groupId)
-    .first<{ group_id: string; member_id: string | null; member_name: string | null }>();
+    .first<{
+      group_id: string;
+      deleted_at: string | null;
+      member_id: string | null;
+      member_name: string | null;
+    }>();
 
   if (!row) {
+    throw notFound("Không tìm thấy nhóm.");
+  }
+
+  // The admin account manages every group (deleted ones too, to restore them) as a built-in
+  // "Quản trị viên" actor, so each existing group route works for it unchanged and every
+  // change it makes lands in the group's activity log under that name.
+  if (user.role === "admin") {
+    return { id: `admin:${user.id}`, groupId: row.group_id, name: ADMIN_ACTOR_NAME };
+  }
+  if (row.deleted_at !== null) {
     throw notFound("Không tìm thấy nhóm.");
   }
   if (!row.member_id || row.member_name === null) {

@@ -60,11 +60,11 @@ export function conflict(message?: string): ApiError {
 }
 
 /** 429 — too many requests from this client; retry after `retryAfterSec`. */
-export function rateLimited(retryAfterSec: number): ApiError {
+export function rateLimited(retryAfterSec: number, message?: string): ApiError {
   return new ApiError(
     "RATE_LIMITED",
     STATUS_BY_CODE.RATE_LIMITED,
-    "Bạn thao tác quá nhanh, vui lòng thử lại sau ít phút.",
+    message ?? "Bạn thao tác quá nhanh, vui lòng thử lại sau ít phút.",
     retryAfterSec,
   );
 }

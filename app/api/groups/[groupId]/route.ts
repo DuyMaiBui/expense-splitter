@@ -1,7 +1,7 @@
 import { requireGroupMember, requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { internal } from "@/lib/errors";
-import { getGroupView, listMembers } from "@/lib/group-queries";
+import { getGroupAdminView, getGroupView, listMembers } from "@/lib/group-queries";
 import { ok, route } from "@/lib/http";
 
 export const GET = route(async (_req, ctx) => {
@@ -11,7 +11,7 @@ export const GET = route(async (_req, ctx) => {
 
   const db = getDb();
   const [group, members] = await Promise.all([
-    getGroupView(db, groupId, user.id),
+    user.role === "admin" ? getGroupAdminView(db, groupId) : getGroupView(db, groupId, user.id),
     listMembers(db, groupId),
   ]);
   if (!group) {

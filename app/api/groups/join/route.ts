@@ -21,7 +21,7 @@ export const POST = route(async (req) => {
   const db = getDb();
 
   const found = await db
-    .prepare("SELECT id, name FROM groups WHERE invite_code = ?")
+    .prepare("SELECT id, name FROM groups WHERE invite_code = ? AND deleted_at IS NULL")
     .bind(inviteCode)
     .first<{ id: string; name: string }>();
   if (!found) {

@@ -1,9 +1,10 @@
 import { forgetUserSessions, hashPassword, requireAdmin } from "@/lib/auth";
 import { generateTempPassword, parseResetBody } from "@/lib/admin";
-import { getDb, nowIso } from "@/lib/db";
+import { auditStatement } from "@/lib/admin-audit";
+import { getDb } from "@/lib/db";
 import { forbidden, notFound } from "@/lib/errors";
 import { ok, readJson, route } from "@/lib/http";
-import type { AdminUser, UserRole } from "@/lib/types";
+import type { AdminUserRef, UserRole } from "@/lib/types";
 
 interface TargetRow {
   id: string;
@@ -45,16 +46,11 @@ export const POST = route(
         .prepare("UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ? AND role = 'user'")
         .bind(hash, salt, target.id),
       db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(target.id),
-      db
-        .prepare(
-          `INSERT INTO admin_audit (admin_user_id, target_user_id, action, created_at)
-           VALUES (?, ?, 'password.reset', ?)`,
-        )
-        .bind(admin.id, target.id, nowIso()),
+      auditStatement(db, { adminUserId: admin.id, targetUserId: target.id, action: "password.reset" }),
     ]);
     forgetUserSessions(target.id);
 
-    const user: AdminUser = {
+    const user: AdminUserRef = {
       id: target.id,
       username: target.username,
       displayName: target.display_name,
@@ -63,5 +59,5 @@ export const POST = route(
     return ok({ user, password: newPassword, generated });
   },
   // PBKDF2 makes each call CPU-expensive: share the stricter login budget.
-  { limit: "auth" },
+  { limit: "auth", allowBanned: true },
 );

@@ -15,12 +15,49 @@ export interface User {
   createdAt: string;
 }
 
-/** An account as listed to the admin: no role (only plain users are listed) and no secrets. */
-export interface AdminUser {
+/** The minimum an admin response needs to name an account. */
+export interface AdminUserRef {
   id: string;
   username: string;
   displayName: string;
   createdAt: string;
+}
+
+/** An account as listed to the admin: only plain users, no secrets. */
+export interface AdminUser extends AdminUserRef {
+  /** Set while the account is banned. */
+  bannedAt: string | null;
+  banReason: string | null;
+  /** Spam violations recorded in the last 24 hours. */
+  recentAbuse: number;
+}
+
+/** A group as listed to the admin, deleted ones included. */
+export interface AdminGroup {
+  id: string;
+  name: string;
+  inviteCode: string;
+  memberCount: number;
+  expenseCount: number;
+  createdAt: string;
+  deletedAt: string | null;
+}
+
+/** An address the API refuses. `expiresAt` null means until an admin lifts it. */
+export interface IpBan {
+  ip: string;
+  reason: string;
+  source: "admin" | "auto";
+  createdAt: string;
+  expiresAt: string | null;
+}
+
+/** An address that produced spam violations but is not banned (yet). */
+export interface IpSuspect {
+  ip: string;
+  accounts: number;
+  events: number;
+  lastAt: string;
 }
 
 /** A group as seen by the calling user. */
@@ -123,7 +160,10 @@ export type LogAction =
   | "preset.create"
   | "preset.update"
   | "preset.delete"
-  | "preset.sync";
+  | "preset.sync"
+  | "group.rename"
+  | "group.delete"
+  | "group.restore";
 
 export type LogEntityType = "group" | "member" | "expense" | "preset";
 

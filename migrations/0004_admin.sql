@@ -10,11 +10,12 @@ ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('
 -- this index instead of scanning and sorting the whole users table.
 CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC, id DESC);
 
--- datastore-class: raw reason="append-only audit trail of privileged admin actions (password re-issue): one row per action, never updated or aggregated, no read path on a hot route. Written only by an admin, a handful of rows per month."
+-- datastore-class: raw reason="append-only audit trail of privileged admin actions (password re-issue, bans, group changes): one row per action, never updated or aggregated, no read path on a hot route. Written only by an admin, a handful of rows per month."
 CREATE TABLE admin_audit (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   admin_user_id  TEXT NOT NULL REFERENCES users(id),
-  target_user_id TEXT NOT NULL REFERENCES users(id),
-  action         TEXT NOT NULL,            -- 'password.reset'
+  target_user_id TEXT REFERENCES users(id),   -- NULL for actions on a group or an IP
+  action         TEXT NOT NULL,               -- 'password.reset', 'user.ban', 'ip.ban', ...
+  detail         TEXT,                        -- short JSON: group id, IP, reason (never a secret)
   created_at     TEXT NOT NULL
 );

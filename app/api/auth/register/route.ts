@@ -1,6 +1,8 @@
 import { createSession, hashPassword } from "@/lib/auth";
 import { getDb, newId, nowIso } from "@/lib/db";
-import { badRequest, conflict } from "@/lib/errors";
+import { badRequest, conflict, rateLimited } from "@/lib/errors";
+import { ABUSE } from "@/lib/guard";
+import { clientKey } from "@/lib/rate-limit";
 import { ok, readJson, route } from "@/lib/http";
 import type { User } from "@/lib/types";
 import { obj, str } from "@/lib/validate";
@@ -11,6 +13,7 @@ const USERNAME_PATTERN = /^[a-z0-9_.]+$/;
 const RESERVED_USERNAMES = new Set(["admin", "administrator", "quantri", "root", "support"]);
 
 export const POST = route(async (req) => {
+  const ip = clientKey(req);
   const body = await readJson(req, (raw) => {
     const o = obj(raw, "body");
     const username = str(o.username, "username", { min: 3, max: 32 }).toLowerCase();
@@ -38,6 +41,18 @@ export const POST = route(async (req) => {
     throw conflict("Tên đăng nhập đã được sử dụng.");
   }
 
+  // Sign-up spam cap per address and day. Counted from users.created_ip, so no extra table.
+  if (ip !== "unknown") {
+    const since = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const recent = await db
+      .prepare("SELECT COUNT(*) AS c FROM users WHERE created_ip = ? AND created_at > ?")
+      .bind(ip, since)
+      .first<{ c: number }>();
+    if ((recent?.c ?? 0) >= ABUSE.registrationsPerDay) {
+      throw rateLimited(3600, "Đã tạo quá nhiều tài khoản từ địa chỉ này hôm nay. Hãy thử lại sau.");
+    }
+  }
+
   const { hash, salt } = await hashPassword(body.password);
   const id = newId();
   const createdAt = nowIso();
@@ -45,10 +60,10 @@ export const POST = route(async (req) => {
   try {
     await db
       .prepare(
-        `INSERT INTO users (id, username, display_name, password_hash, password_salt, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO users (id, username, display_name, password_hash, password_salt, created_at, created_ip)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(id, body.username, body.displayName, hash, salt, createdAt)
+      .bind(id, body.username, body.displayName, hash, salt, createdAt, ip === "unknown" ? null : ip)
       .run();
   } catch {
     // Lost a race with a concurrent registration of the same username (UNIQUE index).

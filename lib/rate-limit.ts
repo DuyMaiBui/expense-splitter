@@ -12,7 +12,7 @@ import { getRateLimiter } from "./db";
  * A failing binding never blocks a request (fail open to layer 2).
  */
 
-export type LimitKind = "auth" | "api";
+export type LimitKind = "auth" | "api" | "write";
 
 export interface LimitResult {
   allowed: boolean;
@@ -23,6 +23,8 @@ export interface LimitResult {
 export const MEMORY_RULES: Record<LimitKind, { limit: number; windowMs: number }> = {
   auth: { limit: 10, windowMs: 60_000 },
   api: { limit: 120, windowMs: 60_000 },
+  // Mutations per signed-in session: a person adds a few expenses a minute, a script hundreds.
+  write: { limit: 30, windowMs: 60_000 },
 };
 
 const MAX_TRACKED_KEYS = 5_000;
@@ -68,7 +70,9 @@ export function memoryLimit(kind: LimitKind, key: string, now = Date.now()): Lim
 }
 
 export async function checkRateLimit(kind: LimitKind, key: string): Promise<LimitResult> {
-  const binding = getRateLimiter(kind === "auth" ? "RL_AUTH" : "RL_API");
+  const binding = getRateLimiter(
+    kind === "auth" ? "RL_AUTH" : kind === "write" ? "RL_WRITE" : "RL_API",
+  );
 
   if (binding) {
     try {
@@ -84,5 +88,11 @@ export async function checkRateLimit(kind: LimitKind, key: string): Promise<Limi
 
 /** The caller's address, as Cloudflare reports it; one shared bucket when it is absent. */
 export function clientKey(req: Request): string {
-  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for") ?? "unknown";
+  const direct = req.headers.get("cf-connecting-ip");
+  if (direct) {
+    return direct.trim();
+  }
+  // Only reached outside Cloudflare (local dev, tests): take the first hop of the chain.
+  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded || "unknown";
 }

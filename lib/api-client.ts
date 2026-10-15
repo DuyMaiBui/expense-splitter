@@ -56,7 +56,8 @@ export function invalidateApiCache(prefix?: string): void {
  *   /api/groups/:id/...      -> that group's data, and the list (memberCount)
  */
 function invalidateAfterMutation(path: string): void {
-  if (path.startsWith("/api/auth/")) {
+  // The admin edits other people's data (renames, deletes, bans): drop everything.
+  if (path.startsWith("/api/auth/") || path.startsWith("/api/admin/")) {
     invalidateApiCache();
     return;
   }

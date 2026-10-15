@@ -1,6 +1,6 @@
 import { createSession, hashPassword, verifyPassword } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { unauthorized } from "@/lib/errors";
+import { forbidden, unauthorized } from "@/lib/errors";
 import { ok, readJson, route } from "@/lib/http";
 import type { User, UserRole } from "@/lib/types";
 import { obj, str } from "@/lib/validate";
@@ -12,6 +12,7 @@ interface LoginRow {
   password_hash: string;
   password_salt: string;
   role: UserRole;
+  banned_at: string | null;
   created_at: string;
 }
 
@@ -26,7 +27,7 @@ export const POST = route(async (req) => {
 
   const row = await getDb()
     .prepare(
-      `SELECT id, username, display_name, password_hash, password_salt, role, created_at
+      `SELECT id, username, display_name, password_hash, password_salt, role, banned_at, created_at
        FROM users WHERE username = ?`,
     )
     .bind(body.username)
@@ -42,6 +43,11 @@ export const POST = route(async (req) => {
   const valid = await verifyPassword(body.password, row.password_hash, row.password_salt);
   if (!valid) {
     throw unauthorized("Tên đăng nhập hoặc mật khẩu không đúng.");
+  }
+
+  // Only after the password checked out, so a stranger learns nothing about who is banned.
+  if (row.banned_at !== null) {
+    throw forbidden("Tài khoản của bạn đã bị khóa. Liên hệ quản trị viên nếu đây là nhầm lẫn.");
   }
 
   await createSession(row.id);

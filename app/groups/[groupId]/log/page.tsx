@@ -13,6 +13,9 @@ const PAGE_SIZE = 50;
 /** One glyph per action so the log scans without reading. Typed: a new LogAction fails to compile here. */
 const ACTION_ICON: Record<LogAction, IconName> = {
   "group.create": "users",
+  "group.rename": "pencil",
+  "group.delete": "trash",
+  "group.restore": "refresh",
   "member.add": "userPlus",
   "member.join": "login",
   "member.remove": "userMinus",

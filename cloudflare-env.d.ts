@@ -16,4 +16,6 @@ interface CloudflareEnv {
   RL_AUTH?: RateLimit;
   /** General API limiter; absent in local dev. */
   RL_API?: RateLimit;
+  /** Per-session mutation limiter; absent in local dev. */
+  RL_WRITE?: RateLimit;
 }

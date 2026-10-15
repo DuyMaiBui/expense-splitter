@@ -2,7 +2,6 @@ import { logStatement } from "@/lib/activity";
 import { requireGroupMember, requireUser } from "@/lib/auth";
 import { getDb, newId, nowIso } from "@/lib/db";
 import { badRequest } from "@/lib/errors";
-import { getGroupView } from "@/lib/group-queries";
 import { ok, readJson, route } from "@/lib/http";
 import { listPresets, MAX_PRESETS_PER_GROUP, planSync } from "@/lib/presets";
 import { bool, obj, str } from "@/lib/validate";
@@ -35,7 +34,7 @@ export const POST = route(async (req, ctx) => {
   const [source, target, sourceGroup] = await Promise.all([
     listPresets(db, sourceGroupId),
     listPresets(db, groupId),
-    getGroupView(db, sourceGroupId, user.id),
+    db.prepare("SELECT name FROM groups WHERE id = ?").bind(sourceGroupId).first<{ name: string }>(),
   ]);
 
   const plan = planSync(source, target, overwrite);
