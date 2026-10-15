@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "expense-splitter",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-15",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      // Self-reference service binding used by the OpenNext runtime.
+      // "service" must match the worker "name" above.
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "expense-splitter"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "expense-splitter",
+      // PLACEHOLDER — replace with the real id printed by:
+      //   npx wrangler d1 create expense-splitter
+      // `wrangler d1 ... --local` works with this placeholder; a remote deploy needs the real id.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

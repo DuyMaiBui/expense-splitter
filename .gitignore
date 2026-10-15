@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+next-env.d.ts
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# OpenNext / Wrangler build + local state
+.open-next/
+.wrangler/
+
+# Secrets and local env (never commit real values)
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+# Logs / OS noise
+*.log
+npm-debug.log*
+.DS_Store

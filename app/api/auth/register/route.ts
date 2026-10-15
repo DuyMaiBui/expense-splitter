@@ -1,0 +1,56 @@
+import { createSession, hashPassword } from "@/lib/auth";
+import { getDb, newId, nowIso } from "@/lib/db";
+import { badRequest, conflict } from "@/lib/errors";
+import { ok, readJson, route } from "@/lib/http";
+import type { User } from "@/lib/types";
+import { obj, str } from "@/lib/validate";
+
+const USERNAME_PATTERN = /^[a-z0-9_.]+$/;
+
+export const POST = route(async (req) => {
+  const body = await readJson(req, (raw) => {
+    const o = obj(raw, "body");
+    const username = str(o.username, "username", { min: 3, max: 32 }).toLowerCase();
+    if (!USERNAME_PATTERN.test(username)) {
+      throw badRequest("Tên đăng nhập chỉ gồm chữ thường, số, dấu gạch dưới và dấu chấm.");
+    }
+    return {
+      username,
+      displayName: str(o.displayName, "displayName", { min: 1, max: 50 }),
+      // Passwords are never trimmed: leading/trailing spaces are part of the secret.
+      password: str(o.password, "password", { min: 6, max: 128, trim: false }),
+    };
+  });
+
+  const db = getDb();
+
+  const taken = await db
+    .prepare("SELECT id FROM users WHERE username = ?")
+    .bind(body.username)
+    .first<{ id: string }>();
+  if (taken) {
+    throw conflict("Tên đăng nhập đã được sử dụng.");
+  }
+
+  const { hash, salt } = await hashPassword(body.password);
+  const id = newId();
+  const createdAt = nowIso();
+
+  try {
+    await db
+      .prepare(
+        `INSERT INTO users (id, username, display_name, password_hash, password_salt, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(id, body.username, body.displayName, hash, salt, createdAt)
+      .run();
+  } catch {
+    // Lost a race with a concurrent registration of the same username (UNIQUE index).
+    throw conflict("Tên đăng nhập đã được sử dụng.");
+  }
+
+  await createSession(id);
+
+  const user: User = { id, username: body.username, displayName: body.displayName, createdAt };
+  return ok({ user }, 201);
+});
