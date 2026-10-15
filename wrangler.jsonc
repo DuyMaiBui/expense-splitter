@@ -4,6 +4,8 @@
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-10-15",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // Worker logs and exceptions, readable with `cf observability telemetry query`.
+  "observability": { "enabled": true },
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
