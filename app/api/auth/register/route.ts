@@ -53,4 +53,4 @@ export const POST = route(async (req) => {
 
   const user: User = { id, username: body.username, displayName: body.displayName, createdAt };
   return ok({ user }, 201);
-});
+}, { limit: "auth" }); // also caps account-spam writes to D1

@@ -308,3 +308,125 @@ a {
     animation-duration: 2.4s;
   }
 }
+
+/* ------------------------------------------------------- icon-first UI */
+
+.btn-icon {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  flex: none;
+}
+
+.btn-icon.btn-ghost {
+  color: var(--muted);
+}
+
+/* An input with a leading icon: the icon is the label, placeholder is the hint. */
+.field {
+  position: relative;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.field > svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.field .input {
+  padding-left: 40px;
+}
+
+.row-nowrap {
+  flex-wrap: nowrap;
+}
+
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.amount-pos {
+  color: var(--success);
+}
+
+.amount-neg {
+  color: var(--danger);
+}
+
+/* Toggle chip: a member picker entry. Selected shows a check and the primary colour. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-text);
+}
+
+.fab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  z-index: 10;
+}
+
+/* Icon-only tabs: a comfortable touch target, label lives in aria-label/title. */
+.tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 10px 12px;
+}
+
+.group-nav-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  margin-bottom: 4px;
+}
+
+.group-nav-head .group-nav-title {
+  margin: 0;
+}

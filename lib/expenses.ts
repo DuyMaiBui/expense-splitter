@@ -88,42 +88,19 @@ interface ShareRow {
   amount: number;
 }
 
-/**
- * Non-deleted expenses of a group (newest `spentAt` first) with their shares, in two
- * index-backed queries. Pass `expenseId` to load just one.
- */
-export async function loadExpenses(
-  db: D1Database,
-  groupId: string,
-  expenseId?: string,
-): Promise<Expense[]> {
-  const idFilter = expenseId ? " AND e.id = ?" : "";
-  const binds = expenseId ? [groupId, expenseId] : [groupId];
+const EXPENSE_COLUMNS = `
+  e.id AS id, e.group_id AS group_id, e.title AS title, e.amount AS amount,
+  e.paid_by_member_id AS paid_by_member_id, e.spent_at AS spent_at, e.note AS note,
+  e.created_by_user_id AS created_by_user_id, e.created_at AS created_at,
+  e.updated_at AS updated_at`;
 
-  const { results: rows } = await db
-    .prepare(
-      `SELECT e.id AS id, e.group_id AS group_id, e.title AS title, e.amount AS amount,
-              e.paid_by_member_id AS paid_by_member_id, e.spent_at AS spent_at, e.note AS note,
-              e.created_by_user_id AS created_by_user_id, e.created_at AS created_at,
-              e.updated_at AS updated_at
-       FROM expenses e
-       WHERE e.group_id = ? AND e.deleted_at IS NULL${idFilter}
-       ORDER BY e.spent_at DESC, e.created_at DESC, e.id DESC`,
-    )
-    .bind(...binds)
-    .all<ExpenseRow>();
+// Same order the composite index idx_expenses_group_live serves, so no sort step is needed.
+const EXPENSE_ORDER = "ORDER BY e.spent_at DESC, e.created_at DESC, e.id DESC";
 
-  const { results: shareRows } = await db
-    .prepare(
-      `SELECT es.expense_id AS expense_id, es.member_id AS member_id, es.amount AS amount
-       FROM expense_shares es
-       JOIN expenses e ON e.id = es.expense_id
-       WHERE e.group_id = ? AND e.deleted_at IS NULL${idFilter}
-       ORDER BY es.member_id ASC`,
-    )
-    .bind(...binds)
-    .all<ShareRow>();
+/** Newest expenses returned by the list endpoint; older ones stay in D1 and in settlement. */
+export const EXPENSE_LIST_LIMIT = 300;
 
+function assemble(rows: ExpenseRow[], shareRows: ShareRow[]): Expense[] {
   const sharesByExpense = new Map<string, ExpenseShare[]>();
   for (const row of shareRows) {
     const list = sharesByExpense.get(row.expense_id) ?? [];
@@ -144,4 +121,72 @@ export async function loadExpenses(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
+}
+
+/**
+ * The newest `limit` non-deleted expenses of a group with their shares: ONE D1 round trip
+ * (a two-statement batch) and a bounded scan. `hasMore` tells the UI the list was cut.
+ */
+export async function loadExpenseList(
+  db: D1Database,
+  groupId: string,
+  limit = EXPENSE_LIST_LIMIT,
+): Promise<{ expenses: Expense[]; hasMore: boolean }> {
+  const fetchCount = limit + 1; // one extra row proves there is more without a COUNT(*)
+
+  const [expenseResult, shareResult] = await db.batch<ExpenseRow | ShareRow>([
+    db
+      .prepare(
+        `SELECT ${EXPENSE_COLUMNS} FROM expenses e
+         WHERE e.group_id = ? AND e.deleted_at IS NULL ${EXPENSE_ORDER} LIMIT ?`,
+      )
+      .bind(groupId, fetchCount),
+    db
+      .prepare(
+        `SELECT es.expense_id AS expense_id, es.member_id AS member_id, es.amount AS amount
+         FROM expense_shares es
+         WHERE es.expense_id IN (
+           SELECT e.id FROM expenses e
+           WHERE e.group_id = ? AND e.deleted_at IS NULL ${EXPENSE_ORDER} LIMIT ?
+         )
+         ORDER BY es.member_id ASC`,
+      )
+      .bind(groupId, fetchCount),
+  ]);
+
+  const rows = (expenseResult?.results ?? []) as ExpenseRow[];
+  const hasMore = rows.length > limit;
+  const kept = hasMore ? rows.slice(0, limit) : rows;
+  const keptIds = new Set(kept.map((row) => row.id));
+  const shares = ((shareResult?.results ?? []) as ShareRow[]).filter((s) => keptIds.has(s.expense_id));
+
+  return { expenses: assemble(kept, shares), hasMore };
+}
+
+/** One non-deleted expense of a group with its shares (one round trip), or null. */
+export async function loadExpense(
+  db: D1Database,
+  groupId: string,
+  expenseId: string,
+): Promise<Expense | null> {
+  const [expenseResult, shareResult] = await db.batch<ExpenseRow | ShareRow>([
+    db
+      .prepare(
+        `SELECT ${EXPENSE_COLUMNS} FROM expenses e
+         WHERE e.id = ? AND e.group_id = ? AND e.deleted_at IS NULL`,
+      )
+      .bind(expenseId, groupId),
+    db
+      .prepare(
+        `SELECT es.expense_id AS expense_id, es.member_id AS member_id, es.amount AS amount
+         FROM expense_shares es WHERE es.expense_id = ? ORDER BY es.member_id ASC`,
+      )
+      .bind(expenseId),
+  ]);
+
+  const rows = (expenseResult?.results ?? []) as ExpenseRow[];
+  if (rows.length === 0) {
+    return null;
+  }
+  return assemble(rows, (shareResult?.results ?? []) as ShareRow[])[0] ?? null;
 }

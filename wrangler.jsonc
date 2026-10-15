@@ -6,6 +6,12 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   // Worker logs and exceptions, readable with `cf observability telemetry query`.
   "observability": { "enabled": true },
+  // Request throttles (limit is per Cloudflare location, period must be 10 or 60 seconds).
+  // lib/rate-limit.ts falls back to an in-memory window where these bindings are absent.
+  "ratelimits": [
+    { "name": "RL_AUTH", "namespace_id": "41001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_API", "namespace_id": "41002", "simple": { "limit": 120, "period": 60 } }
+  ],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"

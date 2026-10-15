@@ -108,6 +108,7 @@ export type ApiErrorCode =
   | "NOT_FOUND"
   | "VALIDATION"
   | "CONFLICT"
+  | "RATE_LIMITED"
   | "INTERNAL";
 
 /** The JSON envelope for every successful response. `data` is always an object. */

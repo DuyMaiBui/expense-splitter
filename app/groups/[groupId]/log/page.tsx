@@ -3,11 +3,23 @@
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { Icon, IconButton, type IconName } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import { formatDateTime } from "@/lib/format";
-import type { LogEntry } from "@/lib/types";
+import type { LogAction, LogEntry } from "@/lib/types";
 
 const PAGE_SIZE = 50;
+
+/** One glyph per action so the log scans without reading. Typed: a new LogAction fails to compile here. */
+const ACTION_ICON: Record<LogAction, IconName> = {
+  "group.create": "users",
+  "member.add": "userPlus",
+  "member.join": "login",
+  "member.remove": "userMinus",
+  "expense.create": "plus",
+  "expense.update": "pencil",
+  "expense.delete": "trash",
+};
 
 interface LogPage {
   entries: LogEntry[];
@@ -23,25 +35,34 @@ export default function LogPage() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchPage = useCallback(
-    async (before: string | null): Promise<LogPage> => {
+    async (before: string | null, fresh = false): Promise<LogPage> => {
       const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
       if (before) {
         query.set("before", before);
       }
-      return api<LogPage>(`/api/groups/${groupId}/log?${query}`);
+      return api<LogPage>(`/api/groups/${groupId}/log?${query}`, { fresh });
     },
     [groupId],
   );
 
-  useEffect(() => {
-    fetchPage(null)
-      .then((page) => {
+  const loadFirst = useCallback(
+    async (fresh = false) => {
+      try {
+        const page = await fetchPage(null, fresh);
         setEntries(page.entries);
         setNextBefore(page.nextBefore);
         setLoaded(true);
-      })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Không tải được nhật ký."));
-  }, [fetchPage]);
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Không tải được nhật ký.");
+      }
+    },
+    [fetchPage],
+  );
+
+  useEffect(() => {
+    void loadFirst();
+  }, [loadFirst]);
 
   async function loadMore(): Promise<void> {
     if (!nextBefore) {
@@ -61,19 +82,34 @@ export default function LogPage() {
 
   return (
     <main className="container stack">
-      <h1>Nhật ký hoạt động</h1>
+      <div className="row row-between row-nowrap">
+        <Icon name="clock" size={26} />
+        <IconButton icon="refresh" label="Làm mới" variant="ghost" onClick={() => void loadFirst(true)} />
+      </div>
 
       {error && <p className="error">{error}</p>}
-      {!loaded && !error && <p className="muted">Đang tải…</p>}
-      {loaded && entries.length === 0 && <p className="empty">Chưa có hoạt động nào.</p>}
+      {!loaded && !error && <div className="spinner" role="status" aria-label="Đang tải" />}
+      {loaded && entries.length === 0 && (
+        <p className="empty" aria-label="Chưa có hoạt động nào">
+          <Icon name="clock" size={40} />
+        </p>
+      )}
 
       {entries.map((entry) => (
         <div key={entry.id} className="card stack">
-          <div>{entry.summary}</div>
-          <div className="muted">{formatDateTime(entry.createdAt)}</div>
+          <div className="row row-nowrap">
+            <Icon name={ACTION_ICON[entry.action] ?? "info"} />
+            <span className="grow">{entry.summary}</span>
+          </div>
+          <div className="meta">
+            <Icon name="clock" size={16} />
+            {formatDateTime(entry.createdAt)}
+          </div>
           {entry.detail && (
             <details>
-              <summary className="muted">Chi tiết</summary>
+              <summary className="muted" title="Chi tiết" aria-label="Chi tiết">
+                <Icon name="info" size={16} />
+              </summary>
               <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.8rem" }}>
                 {JSON.stringify(entry.detail, null, 2)}
               </pre>
@@ -83,9 +119,12 @@ export default function LogPage() {
       ))}
 
       {nextBefore && (
-        <button className="btn" type="button" onClick={loadMore} disabled={loadingMore}>
-          {loadingMore ? "Đang tải…" : "Tải thêm"}
-        </button>
+        <IconButton
+          icon="chevronDown"
+          label="Tải thêm"
+          onClick={() => void loadMore()}
+          disabled={loadingMore}
+        />
       )}
     </main>
   );

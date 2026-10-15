@@ -11,6 +11,18 @@ export function getDb(): D1Database {
   return env.DB;
 }
 
+/**
+ * A Workers Rate Limiting binding (declared under `ratelimits` in wrangler.jsonc), or
+ * undefined where none is configured (local dev, tests, outside a request).
+ */
+export function getRateLimiter(name: "RL_AUTH" | "RL_API"): RateLimit | undefined {
+  try {
+    return getCloudflareContext().env[name];
+  } catch {
+    return undefined;
+  }
+}
+
 /** Current time as ISO 8601 UTC with milliseconds, e.g. "2026-10-15T08:30:00.000Z". */
 export function nowIso(): string {
   return new Date().toISOString();

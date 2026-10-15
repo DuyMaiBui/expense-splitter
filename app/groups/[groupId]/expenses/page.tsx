@@ -4,38 +4,44 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import { formatDateTime, formatVnd } from "@/lib/format";
-import type { Expense, Group, Member } from "@/lib/types";
+import type { Expense, Member } from "@/lib/types";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
+interface ExpenseList {
+  expenses: Expense[];
+  members: Member[];
+  /** True when the server capped the list and older expenses exist. */
+  hasMore: boolean;
+}
+
 export default function ExpensesPage() {
   const { groupId } = useParams<{ groupId: string }>();
-  const [expenses, setExpenses] = useState<Expense[] | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
+  const [data, setData] = useState<ExpenseList | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const [list, group] = await Promise.all([
-        api<{ expenses: Expense[] }>(`/api/groups/${groupId}/expenses`),
-        api<{ group: Group; members: Member[] }>(`/api/groups/${groupId}`),
-      ]);
-      setExpenses(list.expenses);
-      setMembers(group.members);
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(message(e, "Không tải được danh sách chi tiêu."));
-    }
-  }, [groupId]);
+  // One request returns expenses AND members, so the page costs a single Worker invocation.
+  const load = useCallback(
+    async (fresh = false) => {
+      try {
+        setData(await api<ExpenseList>(`/api/groups/${groupId}/expenses`, { fresh }));
+        setLoadError(null);
+      } catch (e) {
+        setLoadError(message(e, "Không tải được danh sách chi tiêu."));
+      }
+    },
+    [groupId],
+  );
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const nameOf = (id: string) => members.find((m) => m.id === id)?.name ?? "?";
+  const nameOf = (id: string) => data?.members.find((m) => m.id === id)?.name ?? "?";
 
   async function handleDelete(expense: Expense): Promise<void> {
     if (!window.confirm(`Xóa chi tiêu "${expense.title}" (${formatVnd(expense.amount)})?`)) {
@@ -50,57 +56,93 @@ export default function ExpensesPage() {
     }
   }
 
+  const expenses = data?.expenses ?? null;
   const total = expenses?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
 
   return (
     <main className="container stack">
-      <div className="row row-between">
-        <h1>Chi tiêu</h1>
-        <Link className="btn btn-primary" href={`/groups/${groupId}/expenses/new`}>
-          + Thêm chi tiêu
-        </Link>
+      <div className="row row-between row-nowrap">
+        <span className="meta" title="Tổng chi tiêu">
+          <Icon name="coins" />
+          <strong className="amount">{formatVnd(total)}</strong>
+          {expenses && <span className="muted">· {expenses.length}{data?.hasMore ? "+" : ""}</span>}
+        </span>
+        <IconButton icon="refresh" label="Làm mới" variant="ghost" onClick={() => void load(true)} />
       </div>
 
       {loadError && <p className="error">{loadError}</p>}
       {actionError && <p className="error">{actionError}</p>}
-      {!expenses && !loadError && <p className="muted">Đang tải…</p>}
-      {expenses && expenses.length === 0 && <p className="empty">Chưa có chi tiêu nào.</p>}
+      {!expenses && !loadError && <div className="spinner" role="status" aria-label="Đang tải" />}
+      {expenses && expenses.length === 0 && (
+        <p className="empty" aria-label="Chưa có chi tiêu nào">
+          <Icon name="receipt" size={40} />
+        </p>
+      )}
 
       {expenses && expenses.length > 0 && (
-        <>
-          <p className="muted">
-            {expenses.length} khoản · tổng <strong>{formatVnd(total)}</strong>
-          </p>
-          <div className="stack">
-            {expenses.map((expense) => (
-              <div key={expense.id} className="card stack">
-                <div className="row row-between">
-                  <strong>{expense.title}</strong>
-                  <strong>{formatVnd(expense.amount)}</strong>
-                </div>
-                <div className="muted">
-                  {formatDateTime(expense.spentAt)} · {nameOf(expense.paidByMemberId)} trả
-                </div>
-                <div className="muted">
-                  Chia cho:{" "}
-                  {expense.shares
-                    .map((s) => `${nameOf(s.memberId)} (${formatVnd(s.amount)})`)
-                    .join(", ")}
-                </div>
-                {expense.note && <div>{expense.note}</div>}
-                <div className="row">
-                  <Link className="btn" href={`/groups/${groupId}/expenses/${expense.id}/edit`}>
-                    Sửa
-                  </Link>
-                  <button className="btn btn-danger" type="button" onClick={() => handleDelete(expense)}>
-                    Xóa
-                  </button>
-                </div>
+        <div className="stack">
+          {expenses.map((expense) => (
+            <div key={expense.id} className="card stack">
+              <div className="row row-between row-nowrap">
+                <strong className="truncate">{expense.title}</strong>
+                <strong className="amount">{formatVnd(expense.amount)}</strong>
               </div>
-            ))}
-          </div>
-        </>
+              <div className="meta">
+                <Icon name="clock" size={16} />
+                {formatDateTime(expense.spentAt)}
+              </div>
+              <div className="meta" title="Người trả">
+                <Icon name="wallet" size={16} />
+                {nameOf(expense.paidByMemberId)}
+              </div>
+              <div className="meta" title="Chia cho">
+                <Icon name="users" size={16} />
+                {expense.shares.map((s) => `${nameOf(s.memberId)} ${formatVnd(s.amount)}`).join(" · ")}
+              </div>
+              {expense.note && (
+                <div className="meta">
+                  <Icon name="note" size={16} />
+                  {expense.note}
+                </div>
+              )}
+              <div className="row">
+                <Link
+                  className="btn btn-icon"
+                  href={`/groups/${groupId}/expenses/${expense.id}/edit`}
+                  prefetch={false}
+                  aria-label="Sửa chi tiêu"
+                  title="Sửa chi tiêu"
+                >
+                  <Icon name="pencil" />
+                </Link>
+                <IconButton
+                  icon="trash"
+                  label="Xóa chi tiêu"
+                  variant="danger"
+                  onClick={() => void handleDelete(expense)}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
       )}
+
+      {data?.hasMore && (
+        <p className="meta" title="Chỉ hiển thị các khoản mới nhất">
+          <Icon name="info" size={16} />
+          {expenses?.length}+
+        </p>
+      )}
+
+      <Link
+        className="fab"
+        href={`/groups/${groupId}/expenses/new`}
+        prefetch={false}
+        aria-label="Thêm chi tiêu"
+        title="Thêm chi tiêu"
+      >
+        <Icon name="plus" size={28} />
+      </Link>
     </main>
   );
 }

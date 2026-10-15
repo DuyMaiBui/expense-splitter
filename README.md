@@ -49,23 +49,36 @@ proxy.ts              # chặn truy cập chưa đăng nhập (quy ước "proxy
 
 ## Triển khai lên Cloudflare
 
-Phần đóng gói (`npm run build:worker`) đã kiểm chứng chạy được. Việc đẩy lên Cloudflare thì
-cần tài khoản của bạn và có một điểm cần lưu ý về công cụ:
+Ứng dụng chạy trên Workers (OpenNext) với D1. Cách đang dùng: kết nối repo GitHub vào
+Workers Builds trong dashboard Cloudflare (build `npx opennextjs-cloudflare build`, deploy
+`npx opennextjs-cloudflare deploy`, biến `NODE_VERSION=22`); mỗi lần push lên `main` là tự deploy.
 
-- **Trong môi trường studio** chỉ được dùng CLI `cf` (hook chặn `wrangler`). `cf` build bằng
-  Vite và `cf migrate` cần wrangler cục bộ, nên chưa có đường chính thức cho Next.js qua
-  OpenNext. Đây là một gap cần báo cho owner của skill `t1k-cloudflare`, không lách bằng
-  wrangler.
-- **Ngoài môi trường studio**, các bước dưới đây hoạt động bình thường.
+- Migration áp lên D1 thật theo thứ tự `migrations/0001_*.sql`, `0002_*.sql`, ... (dán vào
+  console D1 của dashboard, hoặc dùng `cf d1` trong môi trường studio, nơi hook chặn `wrangler`).
+- `database_id` trong `wrangler.jsonc` là D1 thật của dự án.
+- Cục bộ: `npm run dev`, rồi `npm run db:migrate:local` để tạo bảng và index trên D1 giả lập.
 
-```bash
-npx wrangler login
-npx wrangler d1 create expense-splitter     # chép database_id in ra vào wrangler.jsonc
-npm run db:migrate:remote                   # áp migration lên D1 thật
-npm run deploy                              # opennextjs-cloudflare build + deploy
-```
+## Giới hạn Cloudflare Free và cách app tiết kiệm
 
-`database_id` trong `wrangler.jsonc` đang là giá trị tạm, deploy thật bắt buộc phải thay.
+Gói Free tính **theo ngày**, reset lúc 00:00 UTC (7 giờ sáng giờ Việt Nam), không có hạn mức tháng:
+
+| Tài nguyên | Giới hạn Free mỗi ngày |
+|---|---|
+| Worker requests | 100.000 (vượt thì lỗi 1027 tới 00:00 UTC) |
+| CPU mỗi request | 10 ms |
+| D1 rows read | 5.000.000 |
+| D1 rows written | 100.000 |
+| D1 storage | 5 GB tổng |
+
+File tĩnh (JS, CSS) không tính vào hạn mức request của Worker. App giảm số request như sau:
+
+- Client cache GET 30 giây, gộp GET trùng, chỉ xóa cache sau thao tác ghi liên quan.
+- Trang chi tiêu trả cả danh sách lẫn thành viên trong **một** request, tối đa 300 khoản mới nhất.
+- Mọi `<Link>` đặt `prefetch={false}` để không tự gọi Worker khi rê chuột.
+- Session cache 30 giây mỗi isolate; kiểm tra thành viên nhóm là một truy vấn.
+- Rate limit theo IP: đăng nhập/đăng ký 10 lần/phút, API khác 120 lần/phút (binding
+  `ratelimits` trong `wrangler.jsonc`, có dự phòng trong bộ nhớ).
+- `0002_indexes.sql` thêm index cho danh sách chi tiêu và bỏ hai index thừa.
 
 ## Ghi chú kỹ thuật
 

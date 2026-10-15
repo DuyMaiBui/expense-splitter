@@ -9,7 +9,6 @@ export default function EditExpensePage() {
 
   return (
     <main className="container stack">
-      <h1>Sửa chi tiêu</h1>
       <ExpenseForm groupId={groupId} expenseId={expenseId} />
     </main>
   );

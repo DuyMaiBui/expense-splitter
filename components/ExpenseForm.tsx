@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import { formatVnd, isoToLocalInput, localInputToIso } from "@/lib/format";
 import { splitEqual } from "@/lib/split";
@@ -22,7 +23,7 @@ function parseAmount(text: string): number {
   return /^\d+$/.test(digits) ? Number(digits) : Number.NaN;
 }
 
-/** Add / edit form: type what was spent, pick the payer and who shares it. */
+/** Add / edit form: type what was spent, tap the payer, tap who shares it. */
 export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
   const router = useRouter();
   const listHref = `/groups/${groupId}/expenses`;
@@ -47,6 +48,7 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
 
     async function load(): Promise<void> {
       try {
+        // The group lookup is shared with the nav bar through the client cache.
         const groupData = await api<{ group: Group; members: Member[] }>(`/api/groups/${groupId}`);
         const expense = expenseId
           ? (await api<{ expense: Expense }>(`/api/groups/${groupId}/expenses/${expenseId}`)).expense
@@ -156,126 +158,134 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
     return <p className="error">{loadError}</p>;
   }
   if (!ready) {
-    return <p className="muted">Đang tải…</p>;
+    return <div className="spinner" role="status" aria-label="Đang tải" />;
   }
 
   return (
     <form className="card stack" onSubmit={handleSubmit}>
-      <div>
-        <label className="label" htmlFor="title">
-          Chi tiêu gì?
-        </label>
+      <div className="field">
+        <Icon name="receipt" />
         <input
-          id="title"
           className="input"
           maxLength={100}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Ăn trưa, tiền xăng…"
+          aria-label="Chi tiêu gì"
           required
         />
       </div>
 
-      <div>
-        <label className="label" htmlFor="amount">
-          Số tiền (đ)
-        </label>
+      <div className="field">
+        <Icon name="coins" />
         <input
-          id="amount"
           className="input"
           inputMode="numeric"
           value={amountText}
           onChange={(e) => setAmountText(e.target.value)}
           placeholder="120000"
+          aria-label="Số tiền (đồng)"
           required
         />
       </div>
 
-      <div>
-        <label className="label" htmlFor="paid-by">
-          Ai trả?
-        </label>
-        <select id="paid-by" className="input" value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
+      <div className="stack">
+        <span className="meta" title="Ai trả">
+          <Icon name="wallet" size={18} />
+        </span>
+        <div className="row" role="radiogroup" aria-label="Ai trả">
           {selectable.map((m) => (
-            <option key={m.id} value={m.id}>
+            <button
+              key={m.id}
+              type="button"
+              role="radio"
+              className="chip"
+              aria-checked={paidBy === m.id}
+              aria-pressed={paidBy === m.id}
+              onClick={() => setPaidBy(m.id)}
+            >
               {m.name}
-              {m.removedAt ? " (đã xóa)" : ""}
-            </option>
+            </button>
           ))}
-        </select>
+        </div>
       </div>
 
-      <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0 }}>
-        <legend className="label">Chia cho ai?</legend>
-        <div className="row">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => setParticipants(new Set(selectable.filter((m) => !m.removedAt).map((m) => m.id)))}
-          >
-            Chọn tất cả
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={() => setParticipants(new Set())}>
-            Bỏ chọn
-          </button>
-        </div>
-        {selectable.map((m) => (
-          <label key={m.id} className="row" style={{ cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={participants.has(m.id)}
-              onChange={() => toggle(m.id)}
+      <div className="stack">
+        <div className="row row-between row-nowrap">
+          <span className="meta" title="Chia cho ai">
+            <Icon name="users" size={18} />
+            {participants.size}
+          </span>
+          <span className="row row-nowrap">
+            <IconButton
+              icon="check"
+              label="Chọn tất cả"
+              variant="ghost"
+              onClick={() =>
+                setParticipants(new Set(selectable.filter((m) => !m.removedAt).map((m) => m.id)))
+              }
             />
-            <span>
+            <IconButton icon="x" label="Bỏ chọn" variant="ghost" onClick={() => setParticipants(new Set())} />
+          </span>
+        </div>
+        <div className="row" role="group" aria-label="Chia cho ai">
+          {selectable.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className="chip"
+              aria-pressed={participants.has(m.id)}
+              onClick={() => toggle(m.id)}
+            >
               {m.name}
-              {m.removedAt ? " (đã xóa)" : ""}
-            </span>
-          </label>
-        ))}
-      </fieldset>
+            </button>
+          ))}
+        </div>
+      </div>
 
       {preview.length > 0 && (
-        <div className="muted">
-          Mỗi người:{" "}
+        <div className="meta" title="Mỗi người">
+          <Icon name="scale" size={16} />
           {preview.map((s) => `${nameOf(s.memberId)} ${formatVnd(s.amount)}`).join(" · ")}
         </div>
       )}
 
-      <div>
-        <label className="label" htmlFor="spent-at">
-          Thời gian
-        </label>
+      <div className="field">
+        <Icon name="clock" />
         <input
-          id="spent-at"
           className="input"
           type="datetime-local"
           value={spentAt}
           onChange={(e) => setSpentAt(e.target.value)}
+          aria-label="Thời gian"
           required
         />
       </div>
 
-      <div>
-        <label className="label" htmlFor="note">
-          Ghi chú (không bắt buộc)
-        </label>
+      <div className="field">
+        <Icon name="note" />
         <input
-          id="note"
           className="input"
           maxLength={500}
           value={note}
           onChange={(e) => setNote(e.target.value)}
+          placeholder="Ghi chú"
+          aria-label="Ghi chú (không bắt buộc)"
         />
       </div>
 
       {error && <p className="error">{error}</p>}
 
-      <div className="row">
-        <button className="btn btn-primary" type="submit" disabled={saving}>
-          {saving ? "Đang lưu…" : expenseId ? "Lưu thay đổi" : "Thêm chi tiêu"}
-        </button>
-        <button className="btn" type="button" onClick={() => router.push(listHref)}>
-          Hủy
+      <div className="row row-between">
+        <IconButton icon="x" label="Hủy" onClick={() => router.push(listHref)} />
+        <button
+          className="btn btn-icon btn-primary"
+          type="submit"
+          disabled={saving}
+          aria-label={expenseId ? "Lưu thay đổi" : "Thêm chi tiêu"}
+          title={expenseId ? "Lưu thay đổi" : "Thêm chi tiêu"}
+        >
+          <Icon name="check" />
         </button>
       </div>
     </form>

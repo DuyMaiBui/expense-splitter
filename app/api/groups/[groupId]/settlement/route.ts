@@ -18,31 +18,32 @@ export const GET = route(async (_req, ctx) => {
 
   // Aggregates are computed in SQL so the read stays two grouped scans however many
   // expenses the group has accumulated.
-  const [members, paidResult, owedResult] = await Promise.all([
+  // Two D1 round trips total (members + one two-statement batch), run in parallel.
+  const [members, [paidResult, owedResult]] = await Promise.all([
     listMembers(db, groupId),
-    db
-      .prepare(
-        `SELECT paid_by_member_id AS member_id, SUM(amount) AS total
-         FROM expenses
-         WHERE group_id = ? AND deleted_at IS NULL
-         GROUP BY paid_by_member_id`,
-      )
-      .bind(groupId)
-      .all<SumRow>(),
-    db
-      .prepare(
-        `SELECT es.member_id AS member_id, SUM(es.amount) AS total
-         FROM expense_shares es
-         JOIN expenses e ON e.id = es.expense_id
-         WHERE e.group_id = ? AND e.deleted_at IS NULL
-         GROUP BY es.member_id`,
-      )
-      .bind(groupId)
-      .all<SumRow>(),
+    db.batch<SumRow>([
+      db
+        .prepare(
+          `SELECT paid_by_member_id AS member_id, SUM(amount) AS total
+           FROM expenses
+           WHERE group_id = ? AND deleted_at IS NULL
+           GROUP BY paid_by_member_id`,
+        )
+        .bind(groupId),
+      db
+        .prepare(
+          `SELECT es.member_id AS member_id, SUM(es.amount) AS total
+           FROM expense_shares es
+           JOIN expenses e ON e.id = es.expense_id
+           WHERE e.group_id = ? AND e.deleted_at IS NULL
+           GROUP BY es.member_id`,
+        )
+        .bind(groupId),
+    ]),
   ]);
 
-  const paid = new Map(paidResult.results.map((r) => [r.member_id, r.total]));
-  const owed = new Map(owedResult.results.map((r) => [r.member_id, r.total]));
+  const paid = new Map((paidResult?.results ?? []).map((r) => [r.member_id, r.total]));
+  const owed = new Map((owedResult?.results ?? []).map((r) => [r.member_id, r.total]));
 
   const totals: MemberTotals[] = members
     .map((member) => ({

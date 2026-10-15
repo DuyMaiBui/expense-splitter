@@ -7,12 +7,15 @@ import type { ApiErrorCode } from "./types";
 export class ApiError extends Error {
   readonly code: ApiErrorCode;
   readonly status: number;
+  /** Seconds the client should wait; surfaced as a `Retry-After` header (RATE_LIMITED only). */
+  readonly retryAfterSec?: number;
 
-  constructor(code: ApiErrorCode, status: number, message: string) {
+  constructor(code: ApiErrorCode, status: number, message: string, retryAfterSec?: number) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
+    this.retryAfterSec = retryAfterSec;
   }
 }
 
@@ -23,6 +26,7 @@ export const STATUS_BY_CODE: Record<ApiErrorCode, number> = {
   NOT_FOUND: 404,
   VALIDATION: 400,
   CONFLICT: 409,
+  RATE_LIMITED: 429,
   INTERNAL: 500,
 };
 
@@ -53,6 +57,16 @@ export function badRequest(message?: string): ApiError {
 /** 409 — the request conflicts with existing state (duplicate name, self-removal, …). */
 export function conflict(message?: string): ApiError {
   return make("CONFLICT", "Dữ liệu đã tồn tại hoặc xung đột.", message);
+}
+
+/** 429 — too many requests from this client; retry after `retryAfterSec`. */
+export function rateLimited(retryAfterSec: number): ApiError {
+  return new ApiError(
+    "RATE_LIMITED",
+    STATUS_BY_CODE.RATE_LIMITED,
+    "Bạn thao tác quá nhanh, vui lòng thử lại sau ít phút.",
+    retryAfterSec,
+  );
 }
 
 /** 500 — an unexpected server-side failure. */

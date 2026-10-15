@@ -1,4 +1,5 @@
-import { ApiError, badRequest, internal } from "./errors";
+import { ApiError, badRequest, internal, rateLimited } from "./errors";
+import { checkRateLimit, clientKey, type LimitKind } from "./rate-limit";
 
 /**
  * HTTP plumbing shared by every route handler: the success envelope, the error envelope and
@@ -21,7 +22,10 @@ export function ok<T extends object>(data: T, status = 200): Response {
 export function errorResponse(error: ApiError): Response {
   return Response.json(
     { ok: false, error: { code: error.code, message: error.message } },
-    { status: error.status },
+    {
+      status: error.status,
+      headers: error.retryAfterSec ? { "Retry-After": String(error.retryAfterSec) } : undefined,
+    },
   );
 }
 
@@ -30,9 +34,18 @@ export function errorResponse(error: ApiError): Response {
  * `ApiError` maps to its own code/status, anything else is logged and returned as INTERNAL
  * (never leaked to the client).
  */
-export function route(handler: RouteHandler) {
+export function route(handler: RouteHandler, options: { limit?: LimitKind | false } = {}) {
+  const kind = options.limit === undefined ? "api" : options.limit;
+
   return async (req: Request, ctx: RouteContext): Promise<Response> => {
     try {
+      // Throttle before any DB work: a rejected request must cost no D1 rows.
+      if (kind) {
+        const verdict = await checkRateLimit(kind, clientKey(req));
+        if (!verdict.allowed) {
+          throw rateLimited(verdict.retryAfterSec);
+        }
+      }
       return await handler(req, ctx);
     } catch (error) {
       if (error instanceof ApiError) {

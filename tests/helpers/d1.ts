@@ -28,6 +28,11 @@ class Statement {
     return { results: rows.map((row) => ({ ...row }) as T), success: true };
   }
 
+  /** What `db.batch` returns per statement: rows for a SELECT, change info otherwise. */
+  async exec() {
+    return /^\s*SELECT\b/i.test(this.sql) ? this.all() : this.run();
+  }
+
   async run(): Promise<{ success: true; meta: { changes: number; last_row_id: number } }> {
     const info = this.sqlite.prepare(this.sql).run(...this.args);
     return {
@@ -42,20 +47,26 @@ export interface TestDb {
   d1: D1Database;
   /** Direct handle for assertions the API does not expose (row counts, soft-delete flags). */
   raw: DatabaseSync;
+  /** Every SQL string passed to `prepare`, in order (for query-count assertions). */
+  prepared: string[];
 }
 
 export function createTestDb(migrationSql: string): TestDb {
   const raw = new DatabaseSync(":memory:");
   raw.exec(migrationSql);
+  const prepared: string[] = [];
 
   const d1 = {
-    prepare: (sql: string) => new Statement(raw, sql),
+    prepare: (sql: string) => {
+      prepared.push(sql);
+      return new Statement(raw, sql);
+    },
     async batch(statements: Statement[]) {
       raw.exec("BEGIN");
       try {
         const results = [];
         for (const statement of statements) {
-          results.push(await statement.run());
+          results.push(await statement.exec());
         }
         raw.exec("COMMIT");
         return results;
@@ -66,5 +77,5 @@ export function createTestDb(migrationSql: string): TestDb {
     },
   };
 
-  return { d1: d1 as unknown as D1Database, raw };
+  return { d1: d1 as unknown as D1Database, raw, prepared };
 }

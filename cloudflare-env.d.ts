@@ -12,4 +12,8 @@
 interface CloudflareEnv {
   /** D1 database binding declared in wrangler.jsonc (`d1_databases[].binding`). */
   DB: D1Database;
+  /** Login/register limiter (`ratelimits[]` in wrangler.jsonc); absent in local dev. */
+  RL_AUTH?: RateLimit;
+  /** General API limiter; absent in local dev. */
+  RL_API?: RateLimit;
 }

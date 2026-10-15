@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { Icon } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import type { User } from "@/lib/types";
 
@@ -30,42 +31,53 @@ export default function LoginPage() {
   return (
     <main className="container">
       <form className="card stack" onSubmit={handleSubmit}>
-        <h1>Đăng nhập</h1>
-        <div>
-          <label className="label" htmlFor="username">
-            Tên đăng nhập
-          </label>
+        <div className="field">
+          <Icon name="at" />
           <input
-            id="username"
             className="input"
             autoComplete="username"
             autoCapitalize="none"
+            placeholder="Tên đăng nhập"
+            aria-label="Tên đăng nhập"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
           />
         </div>
-        <div>
-          <label className="label" htmlFor="password">
-            Mật khẩu
-          </label>
+        <div className="field">
+          <Icon name="lock" />
           <input
-            id="password"
             className="input"
             type="password"
             autoComplete="current-password"
+            placeholder="Mật khẩu"
+            aria-label="Mật khẩu"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
           />
         </div>
         {error && <p className="error">{error}</p>}
-        <button className="btn btn-primary" type="submit" disabled={busy}>
-          {busy ? "Đang đăng nhập…" : "Đăng nhập"}
-        </button>
-        <p className="muted">
-          Chưa có tài khoản? <Link href="/register">Đăng ký</Link>
-        </p>
+        <div className="row row-between">
+          <Link
+            className="btn btn-icon btn-ghost"
+            href="/register"
+            prefetch={false}
+            aria-label="Tạo tài khoản mới"
+            title="Tạo tài khoản mới"
+          >
+            <Icon name="userPlus" />
+          </Link>
+          <button
+            className="btn btn-primary"
+            type="submit"
+            disabled={busy}
+            aria-label="Đăng nhập"
+            title="Đăng nhập"
+          >
+            <Icon name="login" />
+          </button>
+        </div>
       </form>
     </main>
   );

@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 
-/** App-wide header: product title plus the logout control. */
+/** App-wide header: home icon plus the logout control. Icon-only; meaning is in aria-label. */
 export function AppHeader() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -25,12 +26,11 @@ export function AppHeader() {
   return (
     <header className="app-header">
       <div className="container">
-        <Link className="brand" href="/groups">
-          Chia tiền nhóm
+        {/* prefetch off: every speculative prefetch is a billed Worker invocation */}
+        <Link className="brand" href="/groups" prefetch={false} aria-label="Nhóm của tôi" title="Nhóm của tôi">
+          <Icon name="wallet" size={26} />
         </Link>
-        <button className="btn btn-ghost" type="button" onClick={handleLogout} disabled={busy}>
-          {busy ? "Đang thoát…" : "Đăng xuất"}
-        </button>
+        <IconButton icon="logout" label="Đăng xuất" variant="ghost" onClick={handleLogout} disabled={busy} />
       </div>
     </header>
   );

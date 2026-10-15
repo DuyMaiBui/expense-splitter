@@ -1,9 +1,13 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestDb, type TestDb } from "./helpers/d1";
+
+import { clearSessionCache } from "@/lib/auth";
+import { loadExpenseList } from "@/lib/expenses";
+import { MEMORY_RULES, resetRateLimits } from "@/lib/rate-limit";
 
 import { POST as loginPOST } from "@/app/api/auth/login/route";
 import { POST as logoutPOST } from "@/app/api/auth/logout/route";
@@ -30,6 +34,7 @@ let activeJar = new Map<string, string>();
 
 vi.mock("@/lib/db", () => ({
   getDb: () => testDb.d1,
+  getRateLimiter: () => undefined, // no Workers binding in tests: exercise the in-memory limiter
   newId: () => crypto.randomUUID(),
   nowIso: () => new Date().toISOString(),
 }));
@@ -46,14 +51,19 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-const MIGRATION = readFileSync(
-  fileURLToPath(new URL("../migrations/0001_init.sql", import.meta.url)),
-  "utf8",
-);
+// Every migration, in order, exactly as `migrations apply` would run them.
+const MIGRATIONS_DIR = fileURLToPath(new URL("../migrations/", import.meta.url));
+const MIGRATION = readdirSync(MIGRATIONS_DIR)
+  .filter((name) => name.endsWith(".sql"))
+  .sort()
+  .map((name) => readFileSync(`${MIGRATIONS_DIR}${name}`, "utf8"))
+  .join("\n");
 
 beforeEach(() => {
   testDb = createTestDb(MIGRATION);
   activeJar = new Map();
+  resetRateLimits();
+  clearSessionCache();
 });
 
 // ---------------------------------------------------------------------------- harness
@@ -70,17 +80,23 @@ class Client {
 async function call(
   client: Client,
   handler: Handler,
-  opts: { method?: string; path?: string; params?: Record<string, string>; body?: unknown } = {},
-): Promise<{ status: number; json: Json }> {
+  opts: {
+    method?: string;
+    path?: string;
+    params?: Record<string, string>;
+    body?: unknown;
+    headers?: Record<string, string>;
+  } = {},
+): Promise<{ status: number; json: Json; headers: Headers }> {
   activeJar = client.jar;
   const hasBody = opts.body !== undefined;
   const req = new Request(`http://localhost${opts.path ?? "/api/x"}`, {
     method: opts.method ?? "GET",
-    headers: hasBody ? { "content-type": "application/json" } : undefined,
+    headers: { ...(hasBody ? { "content-type": "application/json" } : {}), ...opts.headers },
     body: hasBody ? JSON.stringify(opts.body) : undefined,
   });
   const res = await handler(req, { params: Promise.resolve(opts.params ?? {}) });
-  return { status: res.status, json: await res.json() };
+  return { status: res.status, json: await res.json(), headers: res.headers };
 }
 
 const h = {
@@ -797,5 +813,168 @@ describe("activity log", () => {
     const eve = new Client();
     await h.register(eve, { username: "eve", displayName: "Eve", password: "secret3" });
     expect((await h.log(eve, gid)).status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------- rate limiting
+
+describe("rate limiting", () => {
+  const withIp = (ip: string) => ({ "cf-connecting-ip": ip });
+
+  it("throttles login attempts and answers 429 RATE_LIMITED with Retry-After", async () => {
+    const c = new Client();
+    const limit = MEMORY_RULES.auth.limit;
+
+    for (let i = 0; i < limit; i += 1) {
+      const r = await call(c, loginPOST, {
+        method: "POST",
+        body: { username: "ghost", password: "wrong-pass" },
+        headers: withIp("203.0.113.9"),
+      });
+      expect(r.status).toBe(401);
+    }
+
+    const blocked = await call(c, loginPOST, {
+      method: "POST",
+      body: { username: "ghost", password: "wrong-pass" },
+      headers: withIp("203.0.113.9"),
+    });
+    expect(blocked.status).toBe(429);
+    expect(blocked.json.error.code).toBe("RATE_LIMITED");
+    expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("counts per client address: another address is unaffected", async () => {
+    const c = new Client();
+    for (let i = 0; i < MEMORY_RULES.auth.limit + 1; i += 1) {
+      await call(c, loginPOST, {
+        method: "POST",
+        body: { username: "ghost", password: "wrong-pass" },
+        headers: withIp("203.0.113.9"),
+      });
+    }
+    const other = await call(c, loginPOST, {
+      method: "POST",
+      body: { username: "ghost", password: "wrong-pass" },
+      headers: withIp("198.51.100.7"),
+    });
+    expect(other.status).toBe(401);
+  });
+
+  it("throttles the general API and a rejected request touches no database", async () => {
+    const c = new Client();
+    for (let i = 0; i < MEMORY_RULES.api.limit; i += 1) {
+      expect((await call(c, meGET, { headers: withIp("203.0.113.50") })).status).toBe(401);
+    }
+
+    testDb.prepared.length = 0;
+    const blocked = await call(c, meGET, { headers: withIp("203.0.113.50") });
+    expect(blocked.status).toBe(429);
+    expect(testDb.prepared).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------- query efficiency
+
+describe("query efficiency", () => {
+  const sessionReads = () => testDb.prepared.filter((sql) => /FROM sessions s/.test(sql)).length;
+
+  it("resolves a session once, then serves it from the isolate cache", async () => {
+    const c = new Client();
+    await h.register(c, { username: "alice", displayName: "Alice", password: "secret1" });
+    testDb.prepared.length = 0;
+
+    for (let i = 0; i < 4; i += 1) {
+      expect((await h.me(c)).status).toBe(200);
+    }
+    expect(sessionReads()).toBe(1);
+  });
+
+  it("logout takes effect immediately in the isolate that handled it", async () => {
+    const c = new Client();
+    await h.register(c, { username: "alice", displayName: "Alice", password: "secret1" });
+    expect((await h.me(c)).status).toBe(200); // warms the cache
+    await h.logout(c);
+    expect((await h.me(c)).status).toBe(401);
+  });
+
+  it("checks group membership with a single query", async () => {
+    const { alice, gid } = await setup();
+    testDb.prepared.length = 0;
+
+    await h.members(alice, gid);
+
+    const membershipChecks = testDb.prepared.filter((sql) => /FROM groups g/.test(sql));
+    expect(membershipChecks).toHaveLength(1);
+    expect(testDb.prepared.some((sql) => /SELECT id FROM groups WHERE id = \?/.test(sql))).toBe(false);
+  });
+
+  it("returns members with the expense list so the page needs one request", async () => {
+    const { alice, gid, aliceM } = await setup();
+    await h.createExpense(alice, gid, {
+      title: "x", amount: 1000, paidByMemberId: aliceM, participantMemberIds: [aliceM],
+    });
+
+    const r = (await h.expenses(alice, gid)).json.data;
+    expect(r.members.map((m: Json) => m.name).sort()).toEqual(["Alice", "Bob", "Chi"]);
+    expect(r.hasMore).toBe(false);
+  });
+
+  it("loads the list and its shares in two statements, bounded by the limit", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    for (let i = 0; i < 5; i += 1) {
+      await h.createExpense(alice, gid, {
+        title: `e${i}`,
+        amount: 1000,
+        paidByMemberId: aliceM,
+        participantMemberIds: [aliceM, bobM],
+        spentAt: `2026-10-0${i + 1}T00:00:00.000Z`,
+      });
+    }
+
+    testDb.prepared.length = 0;
+    const page = await loadExpenseList(testDb.d1, gid, 3);
+
+    expect(testDb.prepared).toHaveLength(2);
+    expect(page.hasMore).toBe(true);
+    expect(page.expenses.map((e) => e.title)).toEqual(["e4", "e3", "e2"]);
+    expect(page.expenses.every((e) => e.shares.length === 2)).toBe(true);
+
+    const all = await loadExpenseList(testDb.d1, gid, 5);
+    expect(all.hasMore).toBe(false);
+    expect(all.expenses).toHaveLength(5);
+  });
+
+  it("answers hot queries from indexes, with no table scan or sort", async () => {
+    const plan = (sql: string) =>
+      (testDb.raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as Array<{ detail: string }>)
+        .map((row) => row.detail)
+        .join(" | ");
+
+    const list = plan(
+      `SELECT id FROM expenses e WHERE e.group_id = 'g' AND e.deleted_at IS NULL
+       ORDER BY e.spent_at DESC, e.created_at DESC, e.id DESC LIMIT 301`,
+    );
+    expect(list).toContain("idx_expenses_group_live");
+    expect(list).not.toMatch(/TEMP B-TREE|SCAN expenses/);
+
+    const groups = plan(
+      `SELECT g.id FROM groups g JOIN group_members mm ON mm.group_id = g.id
+       AND mm.user_id = 'u' AND mm.removed_at IS NULL`,
+    );
+    expect(groups).toMatch(/idx_group_members_user_id|idx_group_members_group_user/);
+    expect(groups).not.toMatch(/SCAN group_members/);
+
+    const log = plan("SELECT id FROM activity_log WHERE group_id = 'g' ORDER BY id DESC LIMIT 50");
+    expect(log).toContain("idx_activity_log_group_id");
+    expect(log).not.toMatch(/TEMP B-TREE/);
+  });
+
+  it("migration 0002 drops the indexes nothing reads", () => {
+    const names = (testDb.raw.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{ name: string }>).map((r) => r.name);
+    expect(names).not.toContain("idx_expenses_group_id");
+    expect(names).not.toContain("idx_sessions_user_id");
+    expect(names).toContain("idx_expenses_group_live");
+    expect(names).toContain("idx_group_members_user_id");
   });
 });

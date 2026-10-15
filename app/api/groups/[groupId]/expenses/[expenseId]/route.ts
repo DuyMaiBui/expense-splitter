@@ -2,7 +2,7 @@ import { logStatement } from "@/lib/activity";
 import { requireGroupMember, requireUser } from "@/lib/auth";
 import { getDb, nowIso } from "@/lib/db";
 import { notFound } from "@/lib/errors";
-import { assertMembersAllowed, loadExpenses, parseExpenseInput } from "@/lib/expenses";
+import { assertMembersAllowed, loadExpense, parseExpenseInput } from "@/lib/expenses";
 import { formatVnd } from "@/lib/format";
 import { listMembers } from "@/lib/group-queries";
 import { ok, readJson, route } from "@/lib/http";
@@ -10,7 +10,7 @@ import { splitEqual } from "@/lib/split";
 import type { Expense } from "@/lib/types";
 
 async function loadOne(db: D1Database, groupId: string, expenseId: string): Promise<Expense> {
-  const [expense] = await loadExpenses(db, groupId, expenseId);
+  const expense = await loadExpense(db, groupId, expenseId);
   if (!expense) {
     throw notFound("Không tìm thấy chi tiêu.");
   }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { Icon } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import type { User } from "@/lib/types";
 
@@ -34,62 +35,71 @@ export default function RegisterPage() {
   return (
     <main className="container">
       <form className="card stack" onSubmit={handleSubmit}>
-        <h1>Đăng ký</h1>
-        <div>
-          <label className="label" htmlFor="username">
-            Tên đăng nhập
-          </label>
+        <div className="field">
+          <Icon name="at" />
           <input
-            id="username"
             className="input"
             autoComplete="username"
             autoCapitalize="none"
             minLength={3}
             maxLength={32}
             pattern="[A-Za-z0-9_.]+"
-            title="Chữ, số, dấu gạch dưới và dấu chấm"
+            title="3-32 ký tự: chữ, số, _ và ."
+            placeholder="Tên đăng nhập"
+            aria-label="Tên đăng nhập"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
           />
-          <p className="muted">3-32 ký tự: chữ, số, _ và .</p>
         </div>
-        <div>
-          <label className="label" htmlFor="displayName">
-            Tên hiển thị
-          </label>
+        <div className="field">
+          <Icon name="user" />
           <input
-            id="displayName"
             className="input"
             maxLength={50}
+            placeholder="Tên hiển thị"
+            aria-label="Tên hiển thị"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             required
           />
         </div>
-        <div>
-          <label className="label" htmlFor="password">
-            Mật khẩu
-          </label>
+        <div className="field">
+          <Icon name="lock" />
           <input
-            id="password"
             className="input"
             type="password"
             autoComplete="new-password"
             minLength={6}
+            title="Ít nhất 6 ký tự"
+            placeholder="Mật khẩu"
+            aria-label="Mật khẩu"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-          <p className="muted">Ít nhất 6 ký tự.</p>
         </div>
         {error && <p className="error">{error}</p>}
-        <button className="btn btn-primary" type="submit" disabled={busy}>
-          {busy ? "Đang tạo tài khoản…" : "Đăng ký"}
-        </button>
-        <p className="muted">
-          Đã có tài khoản? <Link href="/login">Đăng nhập</Link>
-        </p>
+        <div className="row row-between">
+          <Link
+            className="btn btn-icon btn-ghost"
+            href="/login"
+            prefetch={false}
+            aria-label="Đã có tài khoản, đăng nhập"
+            title="Đã có tài khoản, đăng nhập"
+          >
+            <Icon name="login" />
+          </Link>
+          <button
+            className="btn btn-primary"
+            type="submit"
+            disabled={busy}
+            aria-label="Tạo tài khoản"
+            title="Tạo tài khoản"
+          >
+            <Icon name="check" />
+          </button>
+        </div>
       </form>
     </main>
   );

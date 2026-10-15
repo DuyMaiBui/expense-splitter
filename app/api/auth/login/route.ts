@@ -52,4 +52,4 @@ export const POST = route(async (req) => {
     createdAt: row.created_at,
   };
   return ok({ user });
-});
+}, { limit: "auth" }); // brute-force guard: PBKDF2 makes every attempt CPU-expensive

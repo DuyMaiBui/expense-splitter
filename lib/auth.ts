@@ -158,13 +158,39 @@ export async function destroySession(): Promise<void> {
   const token = store.get(SESSION_COOKIE)?.value;
 
   if (token) {
-    await getDb()
-      .prepare("DELETE FROM sessions WHERE id = ?")
-      .bind(await sha256Hex(token))
-      .run();
+    const id = await sha256Hex(token);
+    sessionCache.delete(id);
+    await getDb().prepare("DELETE FROM sessions WHERE id = ?").bind(id).run();
   }
 
   store.delete(SESSION_COOKIE);
+}
+
+// ---------------------------------------------------------------------------
+// session cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Every API call resolves its session (sessions JOIN users). A friend group fires dozens of
+ * calls per minute, so each isolate remembers a resolved session for a few seconds and skips
+ * that D1 read. Trade-off: a logout handled by ANOTHER isolate is honoured here only after
+ * the TTL, so keep it short. The cache never outlives the session's own expiry.
+ */
+const SESSION_CACHE_TTL_MS = 30_000;
+const SESSION_CACHE_MAX = 500;
+const sessionCache = new Map<string, { user: User; until: number }>();
+
+/** Test hook: forget every cached session. */
+export function clearSessionCache(): void {
+  sessionCache.clear();
+}
+
+function cacheSession(id: string, user: User, expiresAt: string): void {
+  if (sessionCache.size >= SESSION_CACHE_MAX) {
+    sessionCache.clear();
+  }
+  const until = Math.min(Date.now() + SESSION_CACHE_TTL_MS, Date.parse(expiresAt));
+  sessionCache.set(id, { user, until });
 }
 
 interface UserRow {
@@ -172,6 +198,7 @@ interface UserRow {
   username: string;
   display_name: string;
   created_at: string;
+  expires_at: string;
 }
 
 function toUser(row: UserRow): User {
@@ -191,17 +218,34 @@ export async function getCurrentUser(): Promise<User | null> {
     return null;
   }
 
+  const id = await sha256Hex(token);
+
+  const cached = sessionCache.get(id);
+  if (cached) {
+    if (cached.until > Date.now()) {
+      return cached.user;
+    }
+    sessionCache.delete(id);
+  }
+
   const row = await getDb()
     .prepare(
-      `SELECT u.id AS id, u.username AS username, u.display_name AS display_name, u.created_at AS created_at
+      `SELECT u.id AS id, u.username AS username, u.display_name AS display_name,
+              u.created_at AS created_at, s.expires_at AS expires_at
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.id = ? AND s.expires_at > ?`,
     )
-    .bind(await sha256Hex(token), nowIso())
+    .bind(id, nowIso())
     .first<UserRow>();
 
-  return row ? toUser(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const user = toUser(row);
+  cacheSession(id, user, row.expires_at);
+  return user;
 }
 
 /** Like `getCurrentUser`, but throws UNAUTHORIZED instead of returning null. */
@@ -226,27 +270,25 @@ export interface GroupMemberRef {
  * is not an active member.
  */
 export async function requireGroupMember(groupId: string, user: User): Promise<GroupMemberRef> {
-  const db = getDb();
+  // One round trip tells the two failures apart: no group row = NOT_FOUND, group row but no
+  // active membership = FORBIDDEN. Both lookups are primary-key / unique-index probes.
+  const row = await getDb()
+    .prepare(
+      `SELECT g.id AS group_id, m.id AS member_id, m.name AS member_name
+       FROM groups g
+       LEFT JOIN group_members m
+         ON m.group_id = g.id AND m.user_id = ? AND m.removed_at IS NULL
+       WHERE g.id = ?`,
+    )
+    .bind(user.id, groupId)
+    .first<{ group_id: string; member_id: string | null; member_name: string | null }>();
 
-  const group = await db
-    .prepare("SELECT id FROM groups WHERE id = ?")
-    .bind(groupId)
-    .first<{ id: string }>();
-  if (!group) {
+  if (!row) {
     throw notFound("Không tìm thấy nhóm.");
   }
-
-  const member = await db
-    .prepare(
-      `SELECT id, group_id, name
-       FROM group_members
-       WHERE group_id = ? AND user_id = ? AND removed_at IS NULL`,
-    )
-    .bind(groupId, user.id)
-    .first<{ id: string; group_id: string; name: string }>();
-  if (!member) {
+  if (!row.member_id || row.member_name === null) {
     throw forbidden("Bạn không phải là thành viên của nhóm này.");
   }
 
-  return { id: member.id, groupId: member.group_id, name: member.name };
+  return { id: row.member_id, groupId: row.group_id, name: row.member_name };
 }

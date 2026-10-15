@@ -9,7 +9,6 @@ export default function NewExpensePage() {
 
   return (
     <main className="container stack">
-      <h1>Thêm chi tiêu</h1>
       <ExpenseForm groupId={groupId} />
     </main>
   );

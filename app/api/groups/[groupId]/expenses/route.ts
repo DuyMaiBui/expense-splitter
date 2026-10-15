@@ -1,7 +1,7 @@
 import { logStatement } from "@/lib/activity";
 import { requireGroupMember, requireUser } from "@/lib/auth";
 import { getDb, newId, nowIso } from "@/lib/db";
-import { assertMembersAllowed, loadExpenses, parseExpenseInput } from "@/lib/expenses";
+import { assertMembersAllowed, loadExpenseList, parseExpenseInput } from "@/lib/expenses";
 import { formatVnd } from "@/lib/format";
 import { listMembers } from "@/lib/group-queries";
 import { ok, readJson, route } from "@/lib/http";
@@ -13,8 +13,13 @@ export const GET = route(async (_req, ctx) => {
   const user = await requireUser();
   await requireGroupMember(groupId, user);
 
-  const expenses = await loadExpenses(getDb(), groupId);
-  return ok({ expenses });
+  // Members ride along so the expenses page needs ONE request instead of two.
+  const db = getDb();
+  const [{ expenses, hasMore }, members] = await Promise.all([
+    loadExpenseList(db, groupId),
+    listMembers(db, groupId),
+  ]);
+  return ok({ expenses, members, hasMore });
 });
 
 export const POST = route(async (req, ctx) => {

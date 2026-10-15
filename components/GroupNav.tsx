@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Icon, type IconName } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import type { Group } from "@/lib/types";
 
@@ -13,10 +14,11 @@ interface GroupNavProps {
 
 interface Tab {
   label: string;
+  icon: IconName;
   href: string;
 }
 
-/** Group-scoped tab bar. Renders even when the group cannot be fetched. */
+/** Group-scoped tab bar: icon-only tabs, each named by aria-label and tooltip. */
 export function GroupNav({ groupId }: GroupNavProps) {
   const pathname = usePathname();
   const [groupName, setGroupName] = useState<string | null>(null);
@@ -24,8 +26,8 @@ export function GroupNav({ groupId }: GroupNavProps) {
   useEffect(() => {
     let cancelled = false;
 
-    // The nav is chrome, not data: a failed lookup degrades the title instead of breaking
-    // the page, and the tab links stay usable.
+    // Served from the client cache when a page already asked for the same group, so the nav
+    // costs no request of its own. A failed lookup degrades the title, not the page.
     api<{ group: Group }>(`/api/groups/${groupId}`)
       .then((data) => {
         if (!cancelled) {
@@ -45,11 +47,11 @@ export function GroupNav({ groupId }: GroupNavProps) {
 
   const expensesBase = `/groups/${groupId}/expenses`;
   const tabs: Tab[] = [
-    { label: "Chi tiêu", href: expensesBase },
-    { label: "Thêm chi tiêu", href: `${expensesBase}/new` },
-    { label: "Tất toán", href: `/groups/${groupId}/settle` },
-    { label: "Thành viên", href: `/groups/${groupId}/members` },
-    { label: "Nhật ký", href: `/groups/${groupId}/log` },
+    { label: "Chi tiêu", icon: "receipt", href: expensesBase },
+    { label: "Thêm chi tiêu", icon: "plus", href: `${expensesBase}/new` },
+    { label: "Tất toán", icon: "scale", href: `/groups/${groupId}/settle` },
+    { label: "Thành viên", icon: "users", href: `/groups/${groupId}/members` },
+    { label: "Nhật ký", icon: "clock", href: `/groups/${groupId}/log` },
   ];
 
   function isActive(href: string): boolean {
@@ -59,7 +61,10 @@ export function GroupNav({ groupId }: GroupNavProps) {
     }
     // "Chi tiêu" owns the list and every expense detail/edit page beneath it.
     if (href === expensesBase) {
-      return pathname === expensesBase || pathname.startsWith(`${expensesBase}/`);
+      return (
+        pathname === expensesBase ||
+        (pathname.startsWith(`${expensesBase}/`) && pathname !== `${expensesBase}/new`)
+      );
     }
     return pathname === href || pathname.startsWith(`${href}/`);
   }
@@ -67,11 +72,17 @@ export function GroupNav({ groupId }: GroupNavProps) {
   return (
     <nav className="group-nav">
       <div className="container">
-        <div className="row row-between">
-          <p className="group-nav-title">{groupName ?? "Nhóm"}</p>
-          {/* /groups lists every group you are in and hosts the "join by invite code" form. */}
-          <Link className="btn btn-ghost" href="/groups">
-            Đổi nhóm / Tham gia nhóm khác
+        <div className="group-nav-head">
+          <p className="group-nav-title truncate">{groupName ?? "…"}</p>
+          {/* /groups lists every group you are in and hosts the join-by-code form. */}
+          <Link
+            className="btn btn-icon btn-ghost"
+            href="/groups"
+            prefetch={false}
+            aria-label="Đổi nhóm hoặc tham gia nhóm khác"
+            title="Đổi nhóm hoặc tham gia nhóm khác"
+          >
+            <Icon name="swap" />
           </Link>
         </div>
         <ul className="tabs">
@@ -80,11 +91,14 @@ export function GroupNav({ groupId }: GroupNavProps) {
             return (
               <li key={tab.href}>
                 <Link
-                  className={active ? "tab tab-active" : "tab"}
+                  className={active ? "tab tab-icon tab-active" : "tab tab-icon"}
                   href={tab.href}
+                  prefetch={false}
+                  aria-label={tab.label}
+                  title={tab.label}
                   aria-current={active ? "page" : undefined}
                 >
-                  {tab.label}
+                  <Icon name={tab.icon} size={22} />
                 </Link>
               </li>
             );
