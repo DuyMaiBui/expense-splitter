@@ -53,6 +53,14 @@ export function str(value: unknown, field: string, options: StrOptions = {}): st
   return result;
 }
 
+/** Asserts the value is a boolean. Strings such as "true" are rejected. */
+export function bool(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") {
+    throw badRequest(`Trường "${field}" phải là true hoặc false.`);
+  }
+  return value;
+}
+
 /** Asserts the value is an integer within an inclusive range. Rejects floats and NaN. */
 export function int(value: unknown, field: string, options: IntOptions = {}): number {
   if (typeof value !== "number" || !Number.isInteger(value)) {

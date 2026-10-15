@@ -19,6 +19,9 @@ import { GET as expensesGET, POST as expensesPOST } from "@/app/api/groups/[grou
 import { GET as logGET } from "@/app/api/groups/[groupId]/log/route";
 import { DELETE as memberDELETE } from "@/app/api/groups/[groupId]/members/[memberId]/route";
 import { GET as membersGET, POST as membersPOST } from "@/app/api/groups/[groupId]/members/route";
+import { DELETE as presetDELETE, PUT as presetPUT } from "@/app/api/groups/[groupId]/presets/[presetId]/route";
+import { GET as presetsGET, POST as presetsPOST } from "@/app/api/groups/[groupId]/presets/route";
+import { POST as presetsSyncPOST } from "@/app/api/groups/[groupId]/presets/sync/route";
 import { GET as settlementGET } from "@/app/api/groups/[groupId]/settlement/route";
 import { POST as joinPOST } from "@/app/api/groups/join/route";
 import { GET as groupsGET, POST as groupsPOST } from "@/app/api/groups/route";
@@ -125,6 +128,15 @@ const h = {
   log: (c: Client, groupId: string, query = "") =>
     call(c, logGET, { params: { groupId }, path: `/api/x${query}` }),
   settlement: (c: Client, groupId: string) => call(c, settlementGET, { params: { groupId } }),
+  presets: (c: Client, groupId: string) => call(c, presetsGET, { params: { groupId } }),
+  createPreset: (c: Client, groupId: string, body: unknown) =>
+    call(c, presetsPOST, { method: "POST", params: { groupId }, body }),
+  updatePreset: (c: Client, groupId: string, presetId: string, body: unknown) =>
+    call(c, presetPUT, { method: "PUT", params: { groupId, presetId }, body }),
+  deletePreset: (c: Client, groupId: string, presetId: string) =>
+    call(c, presetDELETE, { method: "DELETE", params: { groupId, presetId } }),
+  syncPresets: (c: Client, groupId: string, body: unknown) =>
+    call(c, presetsSyncPOST, { method: "POST", params: { groupId }, body }),
 };
 
 const count = (sql: string, ...args: unknown[]): number =>
@@ -976,5 +988,231 @@ describe("query efficiency", () => {
     expect(names).not.toContain("idx_sessions_user_id");
     expect(names).toContain("idx_expenses_group_live");
     expect(names).toContain("idx_group_members_user_id");
+  });
+});
+
+// ---------------------------------------------------------------------------- presets
+
+describe("presets", () => {
+  const shuttle = { name: "Quả cầu lông", unitPrice: 29000 };
+
+  it("creates, lists A to Z, updates and deletes", async () => {
+    const { alice, gid } = await setup();
+
+    const created = await h.createPreset(alice, gid, shuttle);
+    expect(created.status).toBe(201);
+    expect(created.json.data.preset).toMatchObject({ ...shuttle, groupId: gid });
+    await h.createPreset(alice, gid, { name: "Nước suối", unitPrice: 5000 });
+
+    const listed = (await h.presets(alice, gid)).json.data.presets;
+    expect(listed.map((p: Json) => p.name)).toEqual(["Nước suối", "Quả cầu lông"]);
+
+    const id = created.json.data.preset.id;
+    const updated = await h.updatePreset(alice, gid, id, { name: "Quả cầu lông Yonex", unitPrice: 31000 });
+    expect(updated.status).toBe(200);
+    expect(updated.json.data.preset).toMatchObject({ id, name: "Quả cầu lông Yonex", unitPrice: 31000 });
+
+    expect((await h.deletePreset(alice, gid, id)).status).toBe(200);
+    expect((await h.presets(alice, gid)).json.data.presets).toHaveLength(1);
+    expect((await h.deletePreset(alice, gid, id)).status).toBe(404);
+  });
+
+  it("validates name and price", async () => {
+    const { alice, gid } = await setup();
+    for (const body of [
+      { name: "", unitPrice: 1000 },
+      { name: "   ", unitPrice: 1000 },
+      { name: "x".repeat(51), unitPrice: 1000 },
+      { name: "Cầu", unitPrice: 0 },
+      { name: "Cầu", unitPrice: -5 },
+      { name: "Cầu", unitPrice: 1.5 },
+      { name: "Cầu", unitPrice: "29000" },
+      { name: "Cầu", unitPrice: 1_000_000_001 },
+      { name: "Cầu" },
+    ]) {
+      const res = await h.createPreset(alice, gid, body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect(res.json.error.code).toBe("VALIDATION");
+    }
+    expect((await h.presets(alice, gid)).json.data.presets).toHaveLength(0);
+  });
+
+  it("rejects a duplicate name regardless of case and Vietnamese diacritic case", async () => {
+    const { alice, gid } = await setup();
+    await h.createPreset(alice, gid, { name: "Cầu lông", unitPrice: 29000 });
+
+    for (const name of ["cầu lông", "CẦU LÔNG", "  Cầu lông  "]) {
+      const res = await h.createPreset(alice, gid, { name, unitPrice: 1000 });
+      expect(res.status, name).toBe(409);
+      expect(res.json.error.code).toBe("CONFLICT");
+    }
+
+    const other = (await h.createPreset(alice, gid, { name: "Nước", unitPrice: 5000 })).json.data.preset;
+    expect((await h.updatePreset(alice, gid, other.id, { name: "CẦU LÔNG", unitPrice: 5000 })).status).toBe(409);
+    // Renaming to its own name (only the price changes) is not a clash.
+    expect((await h.updatePreset(alice, gid, other.id, { name: "nước", unitPrice: 6000 })).status).toBe(200);
+  });
+
+  it("is scoped to the group and to its members", async () => {
+    const { alice, bob, gid } = await setup();
+    const preset = (await h.createPreset(alice, gid, shuttle)).json.data.preset;
+
+    // bob is a member: shared list.
+    expect((await h.presets(bob, gid)).json.data.presets).toHaveLength(1);
+    expect((await h.updatePreset(bob, gid, preset.id, { name: "Cầu", unitPrice: 30000 })).status).toBe(200);
+
+    const outsider = new Client();
+    await h.register(outsider, { username: "eve", displayName: "Eve", password: "secret3" });
+    expect((await h.presets(outsider, gid)).status).toBe(403);
+    expect((await h.createPreset(outsider, gid, shuttle)).status).toBe(403);
+    expect((await h.deletePreset(outsider, gid, preset.id)).status).toBe(403);
+    expect((await h.presets(new Client(), gid)).status).toBe(401);
+    expect((await h.presets(alice, "missing")).status).toBe(404);
+
+    // A preset id from one group cannot be touched through another group.
+    const second = (await h.createGroup(alice, "Nhóm khác")).json.data.group.id;
+    expect((await h.deletePreset(alice, second, preset.id)).status).toBe(404);
+    expect((await h.presets(alice, second)).json.data.presets).toHaveLength(0);
+  });
+
+  it("caps presets per group", async () => {
+    const { alice, gid } = await setup();
+    const insert = testDb.raw.prepare(
+      "INSERT INTO expense_presets (id, group_id, name, unit_price, created_at, updated_at) VALUES (?, ?, ?, 1000, 'x', 'x')",
+    );
+    for (let i = 0; i < 100; i += 1) {
+      insert.run(`p${i}`, gid, `Mục ${i}`);
+    }
+    const res = await h.createPreset(alice, gid, { name: "Mục 101", unitPrice: 1000 });
+    expect(res.status).toBe(400);
+    expect(res.json.error.message).toContain("100");
+  });
+
+  it("writes every change to the activity log", async () => {
+    const { alice, gid } = await setup();
+    const preset = (await h.createPreset(alice, gid, shuttle)).json.data.preset;
+    await h.updatePreset(alice, gid, preset.id, { name: shuttle.name, unitPrice: 30000 });
+    await h.deletePreset(alice, gid, preset.id);
+
+    const entries = (await h.log(alice, gid)).json.data.entries.slice(0, 3);
+    expect(entries.map((e: Json) => e.action)).toEqual(["preset.delete", "preset.update", "preset.create"]);
+    expect(entries.every((e: Json) => e.entityType === "preset" && e.entityId === preset.id)).toBe(true);
+    expect(entries[2].summary).toContain("29.000đ");
+    expect(entries[1].detail.before.unitPrice).toBe(29000);
+    expect(entries[1].detail.after.unitPrice).toBe(30000);
+  });
+
+  it("deleting a preset leaves expenses created from it untouched", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    const preset = (await h.createPreset(alice, gid, shuttle)).json.data.preset;
+    const expense = (
+      await h.createExpense(alice, gid, {
+        title: "Quả cầu lông ×3", amount: 87000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+      })
+    ).json.data.expense;
+
+    await h.deletePreset(alice, gid, preset.id);
+
+    const after = (await h.getExpense(alice, gid, expense.id)).json.data.expense;
+    expect(after.amount).toBe(87000);
+    expect(sum(after.shares)).toBe(87000);
+  });
+
+  describe("sync", () => {
+    async function twoGroups() {
+      const base = await setup();
+      const second = (await h.createGroup(base.alice, "Nhóm cầu lông")).json.data.group;
+      return { ...base, sid: second.id as string };
+    }
+
+    it("copies missing presets and keeps the ones already there", async () => {
+      const { alice, gid, sid } = await twoGroups();
+      await h.createPreset(alice, sid, { name: "Quả cầu lông", unitPrice: 29000 });
+      await h.createPreset(alice, sid, { name: "Nước suối", unitPrice: 5000 });
+      await h.createPreset(alice, gid, { name: "nước suối", unitPrice: 7000 });
+
+      const res = await h.syncPresets(alice, gid, { sourceGroupId: sid });
+      expect(res.status).toBe(200);
+      expect(res.json.data).toMatchObject({ added: 1, updated: 0, skipped: 1 });
+
+      const byName = Object.fromEntries(
+        res.json.data.presets.map((p: Json) => [p.name, p.unitPrice]),
+      );
+      expect(byName).toEqual({ "Quả cầu lông": 29000, "nước suối": 7000 }); // own price kept
+
+      // Source group is untouched.
+      expect((await h.presets(alice, sid)).json.data.presets).toHaveLength(2);
+    });
+
+    it("is idempotent and writes no log row when nothing changes", async () => {
+      const { alice, gid, sid } = await twoGroups();
+      await h.createPreset(alice, sid, shuttle);
+
+      await h.syncPresets(alice, gid, { sourceGroupId: sid });
+      const logsBefore = count("SELECT COUNT(*) AS c FROM activity_log WHERE action = 'preset.sync'");
+      const again = await h.syncPresets(alice, gid, { sourceGroupId: sid });
+
+      expect(again.json.data).toMatchObject({ added: 0, updated: 0, skipped: 1 });
+      expect(count("SELECT COUNT(*) AS c FROM activity_log WHERE action = 'preset.sync'")).toBe(logsBefore);
+      expect(count("SELECT COUNT(*) AS c FROM expense_presets WHERE group_id = ?", gid)).toBe(1);
+    });
+
+    it("overwrite re-prices matching names only", async () => {
+      const { alice, gid, sid } = await twoGroups();
+      await h.createPreset(alice, sid, { name: "Quả cầu lông", unitPrice: 31000 });
+      await h.createPreset(alice, gid, { name: "Quả cầu lông", unitPrice: 29000 });
+      await h.createPreset(alice, gid, { name: "Chỉ ở nhóm này", unitPrice: 1000 });
+
+      const res = await h.syncPresets(alice, gid, { sourceGroupId: sid, overwrite: true });
+      expect(res.json.data).toMatchObject({ added: 0, updated: 1, skipped: 0 });
+
+      const byName = Object.fromEntries(res.json.data.presets.map((p: Json) => [p.name, p.unitPrice]));
+      expect(byName).toEqual({ "Quả cầu lông": 31000, "Chỉ ở nhóm này": 1000 });
+    });
+
+    it("logs the sync with the source group and counts", async () => {
+      const { alice, gid, sid } = await twoGroups();
+      await h.createPreset(alice, sid, shuttle);
+      await h.syncPresets(alice, gid, { sourceGroupId: sid });
+
+      const entry = (await h.log(alice, gid)).json.data.entries[0];
+      expect(entry.action).toBe("preset.sync");
+      expect(entry.summary).toContain("Nhóm cầu lông");
+      expect(entry.summary).toContain("thêm 1");
+      expect(entry.detail).toMatchObject({ sourceGroupId: sid, overwrite: false, added: [shuttle.name] });
+    });
+
+    it("refuses a source group the caller is not in, and never copies from it", async () => {
+      const { alice, bob, gid, sid } = await twoGroups();
+      await h.createPreset(alice, sid, shuttle);
+
+      // bob is in gid but not in sid.
+      const res = await h.syncPresets(bob, gid, { sourceGroupId: sid });
+      expect(res.status).toBe(403);
+      expect(count("SELECT COUNT(*) AS c FROM expense_presets WHERE group_id = ?", gid)).toBe(0);
+    });
+
+    it("validates the request", async () => {
+      const { alice, gid, sid } = await twoGroups();
+      expect((await h.syncPresets(alice, gid, { sourceGroupId: gid })).status).toBe(400);
+      expect((await h.syncPresets(alice, gid, {})).status).toBe(400);
+      expect((await h.syncPresets(alice, gid, { sourceGroupId: sid, overwrite: "yes" })).status).toBe(400);
+      expect((await h.syncPresets(alice, gid, { sourceGroupId: "missing" })).status).toBe(404);
+    });
+
+    it("refuses a sync that would pass the per-group cap, changing nothing", async () => {
+      const { alice, gid, sid } = await twoGroups();
+      const insert = testDb.raw.prepare(
+        "INSERT INTO expense_presets (id, group_id, name, unit_price, created_at, updated_at) VALUES (?, ?, ?, 1000, 'x', 'x')",
+      );
+      for (let i = 0; i < 60; i += 1) {
+        insert.run(`a${i}`, gid, `A ${i}`);
+        insert.run(`b${i}`, sid, `B ${i}`);
+      }
+
+      const res = await h.syncPresets(alice, gid, { sourceGroupId: sid });
+      expect(res.status).toBe(400);
+      expect(count("SELECT COUNT(*) AS c FROM expense_presets WHERE group_id = ?", gid)).toBe(60);
+    });
   });
 });

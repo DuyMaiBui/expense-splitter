@@ -1,13 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
-import { formatVnd, isoToLocalInput, localInputToIso } from "@/lib/format";
+import { formatVnd, isoToLocalInput, localInputToIso, parseAmountInput } from "@/lib/format";
+import { MAX_QUANTITY, presetAmount } from "@/lib/presets";
 import { splitEqual } from "@/lib/split";
-import type { Expense, Group, Member } from "@/lib/types";
+import type { Expense, Group, Member, Preset } from "@/lib/types";
 
 interface ExpenseFormProps {
   groupId: string;
@@ -17,10 +19,9 @@ interface ExpenseFormProps {
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
-/** "120.000", "120,000" or "120000" → 120000; anything else → NaN. */
-function parseAmount(text: string): number {
-  const digits = text.replace(/[.,\s]/g, "");
-  return /^\d+$/.test(digits) ? Number(digits) : Number.NaN;
+/** Title suggested by a preset: "Quả cầu lông" for one unit, "Quả cầu lông ×3" for more. */
+function presetTitle(preset: Preset, quantity: number): string {
+  return Number.isInteger(quantity) && quantity > 1 ? `${preset.name} ×${quantity}` : preset.name;
 }
 
 /** Add / edit form: type what was spent, tap the payer, tap who shares it. */
@@ -40,6 +41,14 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
   const [spentAt, setSpentAt] = useState(() => isoToLocalInput(new Date().toISOString()));
   const [note, setNote] = useState("");
 
+  // Preset entry is an alternative way to fill the amount, never required.
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [presetId, setPresetId] = useState<string | null>(null);
+  const [quantityText, setQuantityText] = useState("1");
+  // True while the title was filled by a preset, so a later quantity change may rewrite it;
+  // typing in the title field turns it off and the user's text is never overwritten.
+  const [titleIsAuto, setTitleIsAuto] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,11 +62,17 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
         const expense = expenseId
           ? (await api<{ expense: Expense }>(`/api/groups/${groupId}/expenses/${expenseId}`)).expense
           : null;
+        // Presets only help; a failure (for example the table not migrated yet) must never
+        // stop the form from working, so it degrades to the plain amount field.
+        const presetList = await api<{ presets: Preset[] }>(`/api/groups/${groupId}/presets`)
+          .then((data) => data.presets)
+          .catch(() => [] as Preset[]);
         if (cancelled) {
           return;
         }
 
         setMembers(groupData.members);
+        setPresets(presetList);
         if (expense) {
           setExisting(expense);
           setTitle(expense.title);
@@ -96,7 +111,41 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
     return members.filter((m) => m.removedAt === null || keep.has(m.id));
   }, [members, existing]);
 
-  const amount = parseAmount(amountText);
+  const amount = parseAmountInput(amountText);
+
+  const selectedPreset = presets.find((p) => p.id === presetId) ?? null;
+  const quantity = /^\d+$/.test(quantityText) ? Number(quantityText) : Number.NaN;
+
+  /** Applies a preset x quantity to the amount (and to an auto-filled or empty title). */
+  function applyPreset(preset: Preset, quantityInput: string): void {
+    const qty = /^\d+$/.test(quantityInput) ? Number(quantityInput) : Number.NaN;
+    const total = presetAmount(preset.unitPrice, qty);
+    if (!Number.isFinite(total)) {
+      return; // half-typed or out-of-range quantity: leave the amount alone
+    }
+    setAmountText(String(total));
+    if (titleIsAuto || title.trim() === "") {
+      setTitle(presetTitle(preset, qty));
+      setTitleIsAuto(true);
+    }
+  }
+
+  function handlePresetPick(preset: Preset): void {
+    if (presetId === preset.id) {
+      setPresetId(null); // tap again to go back to typing the amount
+      return;
+    }
+    setPresetId(preset.id);
+    applyPreset(preset, quantityText);
+  }
+
+  function handleQuantityChange(next: string): void {
+    setQuantityText(next);
+    if (selectedPreset) {
+      applyPreset(selectedPreset, next);
+    }
+  }
+
   const preview = useMemo(() => {
     if (!Number.isFinite(amount) || amount < 1 || participants.size === 0) {
       return [];
@@ -174,11 +223,67 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
             className="input"
             maxLength={100}
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setTitleIsAuto(false);
+            }}
             placeholder="Ăn trưa, tiền xăng…"
             required
           />
         </div>
+      </div>
+
+      <div className="stack">
+        <div className="row row-between row-nowrap">
+          <span className="label meta">
+            <Icon name="tag" size={18} />
+            Chọn mục mẫu (không bắt buộc)
+          </span>
+          <Link className="btn btn-ghost" href={`/groups/${groupId}/presets`} prefetch={false}>
+            <span>{presets.length === 0 ? "Tạo mục mẫu" : "Quản lý"}</span>
+          </Link>
+        </div>
+        {presets.length > 0 && (
+          <div className="row" role="group" aria-label="Mục mẫu">
+            {presets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="chip"
+                aria-pressed={presetId === preset.id}
+                onClick={() => handlePresetPick(preset)}
+                title={`${preset.name}: ${formatVnd(preset.unitPrice)} / đơn vị`}
+              >
+                {preset.name} · {formatVnd(preset.unitPrice)}
+              </button>
+            ))}
+          </div>
+        )}
+        {selectedPreset && (
+          <div className="row row-nowrap">
+            <label className="label" htmlFor="quantity">
+              Số lượng
+            </label>
+            <div className="field" style={{ maxWidth: 140 }}>
+              <Icon name="plus" />
+              <input
+                id="quantity"
+                className="input"
+                inputMode="numeric"
+                value={quantityText}
+                onChange={(e) => handleQuantityChange(e.target.value)}
+                aria-describedby="quantity-total"
+              />
+            </div>
+            <span id="quantity-total" className="meta">
+              {Number.isFinite(presetAmount(selectedPreset.unitPrice, quantity))
+                ? `${formatVnd(selectedPreset.unitPrice)} × ${quantity} = ${formatVnd(
+                    presetAmount(selectedPreset.unitPrice, quantity),
+                  )}`
+                : `Nhập số nguyên từ 1 đến ${MAX_QUANTITY}`}
+            </span>
+          </div>
+        )}
       </div>
 
       <div>
@@ -192,7 +297,10 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
             className="input"
             inputMode="numeric"
             value={amountText}
-            onChange={(e) => setAmountText(e.target.value)}
+            onChange={(e) => {
+              setAmountText(e.target.value);
+              setPresetId(null); // typed by hand: the amount no longer follows a preset
+            }}
             placeholder="120000"
             required
           />

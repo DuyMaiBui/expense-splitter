@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDateTime, formatVnd, isoToLocalInput, localInputToIso } from "./format";
+import { formatDateTime, formatVnd, isoToLocalInput, localInputToIso, parseAmountInput } from "./format";
 
 describe("formatVnd", () => {
   it("groups thousands with dots and appends đ", () => {
@@ -52,5 +52,20 @@ describe("date formatting (Asia/Ho_Chi_Minh, UTC+7)", () => {
   it("localInputToIso returns '' for malformed input", () => {
     expect(localInputToIso("")).toBe("");
     expect(localInputToIso("14/10/2026 10:00")).toBe("");
+  });
+});
+
+describe("parseAmountInput", () => {
+  it("accepts digits with dot, comma or space separators", () => {
+    expect(parseAmountInput("120000")).toBe(120000);
+    expect(parseAmountInput("120.000")).toBe(120000);
+    expect(parseAmountInput("120,000")).toBe(120000);
+    expect(parseAmountInput(" 1 200 000 ")).toBe(1200000);
+  });
+
+  it("gives NaN for empty or non-numeric input", () => {
+    for (const text of ["", "abc", "12a", "-5", "1e3", "12.5.x"]) {
+      expect(parseAmountInput(text), text).toBeNaN();
+    }
   });
 });

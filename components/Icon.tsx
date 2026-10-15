@@ -5,6 +5,12 @@ import type { ButtonHTMLAttributes, SVGProps } from "react";
  * Inline on purpose: no icon-font or icon-package request, no extra bundle dependency.
  */
 const PATHS = {
+  tag: (
+    <>
+      <path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
+      <circle cx="7.5" cy="7.5" r="1.3" />
+    </>
+  ),
   wallet: (
     <>
       <rect x="3" y="6" width="18" height="14" rx="2" />

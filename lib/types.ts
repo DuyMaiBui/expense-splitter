@@ -58,6 +58,16 @@ export interface Expense {
   updatedAt: string;
 }
 
+/** A named unit price the expense form multiplies by a quantity. `unitPrice` is integer VND. */
+export interface Preset {
+  id: string;
+  groupId: string;
+  name: string;
+  unitPrice: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** One row of the group activity log. `id` is the decimal string of an autoincrement integer. */
 export interface LogEntry {
   id: string;
@@ -97,9 +107,13 @@ export type LogAction =
   | "member.remove"
   | "expense.create"
   | "expense.update"
-  | "expense.delete";
+  | "expense.delete"
+  | "preset.create"
+  | "preset.update"
+  | "preset.delete"
+  | "preset.sync";
 
-export type LogEntityType = "group" | "member" | "expense";
+export type LogEntityType = "group" | "member" | "expense" | "preset";
 
 /** Error codes mapped 1:1 to HTTP statuses by lib/http.ts. */
 export type ApiErrorCode =

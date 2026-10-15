@@ -136,3 +136,12 @@ export function localInputToIso(value: string): string {
 
   return new Date(timestamp).toISOString();
 }
+
+/**
+ * Parses a typed amount: "120.000", "120,000", "120 000" and "120000" all give 120000.
+ * Anything that is not a plain run of digits after stripping separators gives NaN.
+ */
+export function parseAmountInput(text: string): number {
+  const digits = text.replace(/[.,\s]/g, "");
+  return /^\d+$/.test(digits) ? Number(digits) : Number.NaN;
+}

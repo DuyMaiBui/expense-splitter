@@ -58,6 +58,14 @@ Workers Builds trong dashboard Cloudflare (build `npx opennextjs-cloudflare buil
 - `database_id` trong `wrangler.jsonc` là D1 thật của dự án.
 - Cục bộ: `npm run dev`, rồi `npm run db:migrate:local` để tạo bảng và index trên D1 giả lập.
 
+## Mục mẫu (đơn giá có sẵn)
+
+Mỗi nhóm có danh sách mục mẫu: tên và giá một đơn vị (ví dụ "Quả cầu lông" 29.000đ). Trong form
+thêm chi tiêu, chọn mục mẫu rồi nhập số lượng thì số tiền tự tính; vẫn nhập thẳng số tiền được
+như bình thường. Trang **Mục mẫu** cho thêm, sửa, xóa và **đồng bộ từ nhóm khác** mà bạn đã tham
+gia (mục trùng tên được giữ nguyên, tùy chọn cập nhật giá). Bảng `expense_presets` nằm trong
+`migrations/0003_presets.sql`.
+
 ## Giới hạn Cloudflare Free và cách app tiết kiệm
 
 Gói Free tính **theo ngày**, reset lúc 00:00 UTC (7 giờ sáng giờ Việt Nam), không có hạn mức tháng:

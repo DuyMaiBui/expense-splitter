@@ -19,6 +19,10 @@ const ACTION_ICON: Record<LogAction, IconName> = {
   "expense.create": "plus",
   "expense.update": "pencil",
   "expense.delete": "trash",
+  "preset.create": "tag",
+  "preset.update": "pencil",
+  "preset.delete": "trash",
+  "preset.sync": "swap",
 };
 
 interface LogPage {
