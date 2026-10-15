@@ -59,23 +59,13 @@ export default function LoginPage() {
         </div>
         {error && <p className="error">{error}</p>}
         <div className="row row-between">
-          <Link
-            className="btn btn-icon btn-ghost"
-            href="/register"
-            prefetch={false}
-            aria-label="Tạo tài khoản mới"
-            title="Tạo tài khoản mới"
-          >
+          <Link className="btn btn-ghost" href="/register" prefetch={false}>
             <Icon name="userPlus" />
+            <span>Tạo tài khoản</span>
           </Link>
-          <button
-            className="btn btn-primary"
-            type="submit"
-            disabled={busy}
-            aria-label="Đăng nhập"
-            title="Đăng nhập"
-          >
+          <button className="btn btn-primary" type="submit" disabled={busy}>
             <Icon name="login" />
+            <span>Đăng nhập</span>
           </button>
         </div>
       </form>

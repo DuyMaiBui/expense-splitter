@@ -16,35 +16,44 @@ if (!existsSync(STATE_DIR)) {
 }
 
 const dbFiles = readdirSync(STATE_DIR).filter((n) => n.endsWith(".sqlite") && n !== "metadata.sqlite");
-if (dbFiles.length !== 1) {
-  console.error(`Cần đúng 1 file DB trong ${STATE_DIR}, thấy ${dbFiles.length}. Mở trang bất kỳ khi \`npm run dev\` đang chạy để tạo DB.`);
+if (dbFiles.length === 0) {
+  console.error("Chưa có file DB local. Mở trang bất kỳ khi `npm run dev` đang chạy để tạo DB.");
   process.exit(1);
 }
 
-const db = new DatabaseSync(join(STATE_DIR, dbFiles[0]));
-db.exec(`CREATE TABLE IF NOT EXISTS d1_migrations (
+// Miniflare names the file after the configured database_id, so changing the id (placeholder ->
+// real) leaves an older file behind and `next dev` uses whichever matches NOW. Migrations are
+// idempotent through d1_migrations, so apply them to every local file instead of guessing.
+const files = readdirSync(MIGRATIONS_DIR).filter((n) => n.endsWith(".sql")).sort();
+
+for (const dbFile of dbFiles) {
+  const db = new DatabaseSync(join(STATE_DIR, dbFile));
+  db.exec(`CREATE TABLE IF NOT EXISTS d1_migrations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT UNIQUE,
   applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`);
 
-const applied = new Set(db.prepare("SELECT name FROM d1_migrations").all().map((r) => r.name));
-const files = readdirSync(MIGRATIONS_DIR).filter((n) => n.endsWith(".sql")).sort();
+  const applied = new Set(db.prepare("SELECT name FROM d1_migrations").all().map((r) => r.name));
 
-let count = 0;
-for (const name of files) {
-  if (applied.has(name)) continue;
-  db.exec("BEGIN");
-  try {
-    db.exec(readFileSync(join(MIGRATIONS_DIR, name), "utf8"));
-    db.prepare("INSERT INTO d1_migrations (name) VALUES (?)").run(name);
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    console.error(`Migration ${name} lỗi:`, error.message);
-    process.exit(1);
+  let count = 0;
+  for (const name of files) {
+    if (applied.has(name)) continue;
+    db.exec("BEGIN");
+    try {
+      db.exec(readFileSync(join(MIGRATIONS_DIR, name), "utf8"));
+      db.prepare("INSERT INTO d1_migrations (name) VALUES (?)").run(name);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      console.error(`Migration ${name} lỗi (${dbFile.slice(0, 8)}…):`, error.message);
+      process.exit(1);
+    }
+    console.log(`${dbFile.slice(0, 8)}… applied ${name}`);
+    count += 1;
   }
-  console.log(`applied ${name}`);
-  count += 1;
+  db.close();
+  if (count === 0) {
+    console.log(`${dbFile.slice(0, 8)}… không có migration mới.`);
+  }
 }
-console.log(count === 0 ? "Không có migration mới." : `Đã áp dụng ${count} migration.`);

@@ -50,16 +50,17 @@ export default function GroupsPage() {
   return (
     <main className="container stack">
       <div className="row row-between">
-        <Icon name="users" size={26} />
+        <h1 className="row row-nowrap">
+          <Icon name="users" size={26} />
+          <span>Nhóm của tôi</span>
+        </h1>
         <IconButton icon="refresh" label="Làm mới" variant="ghost" onClick={() => void load(true)} />
       </div>
 
       {loadError && <p className="error">{loadError}</p>}
       {!groups && !loadError && <div className="spinner" role="status" aria-label="Đang tải" />}
       {groups && groups.length === 0 && (
-        <p className="empty">
-          <Icon name="users" size={32} />
-        </p>
+        <p className="empty">Bạn chưa có nhóm nào. Tạo nhóm mới hoặc nhập mã mời bên dưới.</p>
       )}
 
       {groups && groups.length > 0 && (
@@ -100,8 +101,9 @@ export default function GroupsPage() {
             required
           />
         </div>
-        <button className="btn btn-icon btn-primary" type="submit" disabled={busy} aria-label="Tạo nhóm" title="Tạo nhóm">
+        <button className="btn btn-primary" type="submit" disabled={busy}>
           <Icon name="plus" />
+          <span>Tạo nhóm</span>
         </button>
       </form>
 
@@ -121,8 +123,9 @@ export default function GroupsPage() {
             required
           />
         </div>
-        <button className="btn btn-icon" type="submit" disabled={busy} aria-label="Tham gia nhóm" title="Tham gia nhóm">
+        <button className="btn" type="submit" disabled={busy}>
           <Icon name="login" />
+          <span>Tham gia</span>
         </button>
       </form>
     </main>

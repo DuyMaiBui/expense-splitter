@@ -184,19 +184,30 @@ interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 
   /** Accessible name and tooltip: an icon-only control must still say what it does. */
   label: string;
   variant?: "default" | "primary" | "danger" | "ghost";
+  /** Show the label as text next to the icon. Use it for primary actions: an icon alone is easy to misread. */
+  showLabel?: boolean;
 }
 
-export function IconButton({ icon, label, variant = "default", className, ...rest }: IconButtonProps) {
+export function IconButton({
+  icon,
+  label,
+  variant = "default",
+  showLabel = false,
+  className,
+  ...rest
+}: IconButtonProps) {
   const variantClass = variant === "default" ? "" : ` btn-${variant}`;
+  const shapeClass = showLabel ? "btn" : "btn btn-icon";
   return (
     <button
       type="button"
-      className={`btn btn-icon${variantClass}${className ? ` ${className}` : ""}`}
+      className={`${shapeClass}${variantClass}${className ? ` ${className}` : ""}`}
       aria-label={label}
       title={label}
       {...rest}
     >
       <Icon name={icon} />
+      {showLabel && <span>{label}</span>}
     </button>
   );
 }

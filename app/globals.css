@@ -147,6 +147,12 @@ a {
   overflow-x: auto;
 }
 
+/* Tabs share the row evenly so all five labels stay visible on a phone. */
+.tabs > li {
+  flex: 1 1 0;
+  min-width: 56px;
+}
+
 .tab {
   display: inline-block;
   padding: 8px 10px;
@@ -325,8 +331,12 @@ a {
 /* An input with a leading icon: the icon is the label, placeholder is the hint. */
 .field {
   position: relative;
-  flex: 1 1 160px;
   min-width: 0;
+}
+
+/* Only inside a row: in a column stack a flex-basis would become the field's HEIGHT. */
+.row > .field {
+  flex: 1 1 160px;
 }
 
 .field > svg {
@@ -399,24 +409,39 @@ a {
   color: var(--primary-text);
 }
 
+.has-fab {
+  /* keeps the last card clear of the floating action button */
+  padding-bottom: 88px;
+}
+
 .fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 20px;
+  font-weight: 600;
+  text-decoration: none;
   position: fixed;
   right: 16px;
   bottom: 16px;
-  width: 52px;
   height: 52px;
-  border-radius: 50%;
+  border-radius: 26px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
   z-index: 10;
 }
 
-/* Icon-only tabs: a comfortable touch target, label lives in aria-label/title. */
+/* Tabs: icon above a short visible label, so the destination is never a guess. */
 .tab-icon {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-width: 48px;
-  padding: 10px 12px;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 4px;
+  font-size: 0.75rem;
+  line-height: 1.2;
 }
 
 .group-nav-head {

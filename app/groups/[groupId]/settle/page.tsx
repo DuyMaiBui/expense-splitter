@@ -40,8 +40,9 @@ export default function SettlePage() {
   return (
     <main className="container stack">
       <div className="row row-between row-nowrap">
-        <span className="meta" title="Tổng chi tiêu của nhóm">
+        <span className="meta">
           <Icon name="coins" />
+          <span>Tổng chi tiêu</span>
           <strong className="amount">{data ? formatVnd(data.totalSpent) : "…"}</strong>
         </span>
         <IconButton icon="refresh" label="Làm mới" variant="ghost" onClick={() => void load(true)} />
@@ -52,11 +53,13 @@ export default function SettlePage() {
 
       {data && (
         <>
-          <section className="card stack" aria-label="Ai trả ai">
+          <section className="card stack">
+            <h2 className="row row-nowrap">
+              <Icon name="handshake" />
+              <span>Ai trả ai</span>
+            </h2>
             {data.transfers.length === 0 ? (
-              <p className="empty" aria-label="Mọi người đã huề, không ai nợ ai">
-                <Icon name="handshake" size={40} />
-              </p>
+              <p className="empty">Mọi người đã huề, không ai nợ ai.</p>
             ) : (
               data.transfers.map((t) => (
                 <div key={`${t.fromMemberId}-${t.toMemberId}`} className="row row-between row-nowrap">
@@ -71,22 +74,18 @@ export default function SettlePage() {
             )}
           </section>
 
-          <section className="card" aria-label="Chi tiết từng người">
+          <section className="card stack">
+            <h2 className="row row-nowrap">
+              <Icon name="scale" />
+              <span>Chi tiết từng người</span>
+            </h2>
             <table className="table">
               <thead>
                 <tr>
-                  <th title="Thành viên" aria-label="Thành viên">
-                    <Icon name="user" size={18} />
-                  </th>
-                  <th title="Đã trả" aria-label="Đã trả">
-                    <Icon name="wallet" size={18} />
-                  </th>
-                  <th title="Phải chịu" aria-label="Phải chịu">
-                    <Icon name="receipt" size={18} />
-                  </th>
-                  <th title="Chênh lệch (dương: được nhận lại, âm: còn phải trả)" aria-label="Chênh lệch">
-                    <Icon name="scale" size={18} />
-                  </th>
+                  <th>Thành viên</th>
+                  <th>Đã trả</th>
+                  <th>Phải chịu</th>
+                  <th>Chênh lệch</th>
                 </tr>
               </thead>
               <tbody>
@@ -95,9 +94,7 @@ export default function SettlePage() {
                     <td>
                       {b.name}
                       {b.removed && (
-                        <span className="badge" title="Đã xóa khỏi nhóm" aria-label="Đã xóa khỏi nhóm">
-                          <Icon name="userMinus" size={14} />
-                        </span>
+                        <span className="badge">đã xóa</span>
                       )}
                     </td>
                     <td>{formatVnd(b.paid)}</td>
@@ -110,6 +107,7 @@ export default function SettlePage() {
                 ))}
               </tbody>
             </table>
+            <p className="muted">Số dương: được nhận lại. Số âm: còn phải trả.</p>
           </section>
         </>
       )}

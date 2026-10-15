@@ -14,6 +14,8 @@ interface GroupNavProps {
 
 interface Tab {
   label: string;
+  /** Shorter visible text for the narrow tab bar; `label` stays the full name. */
+  short?: string;
   icon: IconName;
   href: string;
 }
@@ -48,7 +50,7 @@ export function GroupNav({ groupId }: GroupNavProps) {
   const expensesBase = `/groups/${groupId}/expenses`;
   const tabs: Tab[] = [
     { label: "Chi tiêu", icon: "receipt", href: expensesBase },
-    { label: "Thêm chi tiêu", icon: "plus", href: `${expensesBase}/new` },
+    { label: "Thêm chi tiêu", short: "Thêm", icon: "plus", href: `${expensesBase}/new` },
     { label: "Tất toán", icon: "scale", href: `/groups/${groupId}/settle` },
     { label: "Thành viên", icon: "users", href: `/groups/${groupId}/members` },
     { label: "Nhật ký", icon: "clock", href: `/groups/${groupId}/log` },
@@ -76,13 +78,14 @@ export function GroupNav({ groupId }: GroupNavProps) {
           <p className="group-nav-title truncate">{groupName ?? "…"}</p>
           {/* /groups lists every group you are in and hosts the join-by-code form. */}
           <Link
-            className="btn btn-icon btn-ghost"
+            className="btn btn-ghost"
             href="/groups"
             prefetch={false}
             aria-label="Đổi nhóm hoặc tham gia nhóm khác"
             title="Đổi nhóm hoặc tham gia nhóm khác"
           >
             <Icon name="swap" />
+            <span>Đổi nhóm</span>
           </Link>
         </div>
         <ul className="tabs">
@@ -94,11 +97,10 @@ export function GroupNav({ groupId }: GroupNavProps) {
                   className={active ? "tab tab-icon tab-active" : "tab tab-icon"}
                   href={tab.href}
                   prefetch={false}
-                  aria-label={tab.label}
-                  title={tab.label}
                   aria-current={active ? "page" : undefined}
                 >
                   <Icon name={tab.icon} size={22} />
+                  <span>{tab.short ?? tab.label}</span>
                 </Link>
               </li>
             );

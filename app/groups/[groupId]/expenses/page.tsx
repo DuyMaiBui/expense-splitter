@@ -60,10 +60,11 @@ export default function ExpensesPage() {
   const total = expenses?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
 
   return (
-    <main className="container stack">
+    <main className="container stack has-fab">
       <div className="row row-between row-nowrap">
-        <span className="meta" title="Tổng chi tiêu">
+        <span className="meta">
           <Icon name="coins" />
+          <span>Tổng</span>
           <strong className="amount">{formatVnd(total)}</strong>
           {expenses && <span className="muted">· {expenses.length}{data?.hasMore ? "+" : ""}</span>}
         </span>
@@ -74,9 +75,7 @@ export default function ExpensesPage() {
       {actionError && <p className="error">{actionError}</p>}
       {!expenses && !loadError && <div className="spinner" role="status" aria-label="Đang tải" />}
       {expenses && expenses.length === 0 && (
-        <p className="empty" aria-label="Chưa có chi tiêu nào">
-          <Icon name="receipt" size={40} />
-        </p>
+        <p className="empty">Chưa có chi tiêu nào. Bấm "Thêm chi tiêu" để bắt đầu.</p>
       )}
 
       {expenses && expenses.length > 0 && (
@@ -91,13 +90,13 @@ export default function ExpensesPage() {
                 <Icon name="clock" size={16} />
                 {formatDateTime(expense.spentAt)}
               </div>
-              <div className="meta" title="Người trả">
+              <div className="meta">
                 <Icon name="wallet" size={16} />
-                {nameOf(expense.paidByMemberId)}
+                {nameOf(expense.paidByMemberId)} trả
               </div>
-              <div className="meta" title="Chia cho">
+              <div className="meta">
                 <Icon name="users" size={16} />
-                {expense.shares.map((s) => `${nameOf(s.memberId)} ${formatVnd(s.amount)}`).join(" · ")}
+                Chia cho: {expense.shares.map((s) => `${nameOf(s.memberId)} ${formatVnd(s.amount)}`).join(" · ")}
               </div>
               {expense.note && (
                 <div className="meta">
@@ -106,19 +105,15 @@ export default function ExpensesPage() {
                 </div>
               )}
               <div className="row">
-                <Link
-                  className="btn btn-icon"
-                  href={`/groups/${groupId}/expenses/${expense.id}/edit`}
-                  prefetch={false}
-                  aria-label="Sửa chi tiêu"
-                  title="Sửa chi tiêu"
-                >
+                <Link className="btn" href={`/groups/${groupId}/expenses/${expense.id}/edit`} prefetch={false}>
                   <Icon name="pencil" />
+                  <span>Sửa</span>
                 </Link>
                 <IconButton
                   icon="trash"
-                  label="Xóa chi tiêu"
+                  label="Xóa"
                   variant="danger"
+                  showLabel
                   onClick={() => void handleDelete(expense)}
                 />
               </div>
@@ -128,20 +123,15 @@ export default function ExpensesPage() {
       )}
 
       {data?.hasMore && (
-        <p className="meta" title="Chỉ hiển thị các khoản mới nhất">
+        <p className="meta">
           <Icon name="info" size={16} />
-          {expenses?.length}+
+          Chỉ hiển thị {expenses?.length} khoản mới nhất.
         </p>
       )}
 
-      <Link
-        className="fab"
-        href={`/groups/${groupId}/expenses/new`}
-        prefetch={false}
-        aria-label="Thêm chi tiêu"
-        title="Thêm chi tiêu"
-      >
-        <Icon name="plus" size={28} />
+      <Link className="btn btn-primary fab" href={`/groups/${groupId}/expenses/new`} prefetch={false}>
+        <Icon name="plus" size={22} />
+        <span>Thêm chi tiêu</span>
       </Link>
     </main>
   );

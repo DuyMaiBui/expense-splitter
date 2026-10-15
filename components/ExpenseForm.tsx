@@ -163,35 +163,46 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
 
   return (
     <form className="card stack" onSubmit={handleSubmit}>
-      <div className="field">
-        <Icon name="receipt" />
-        <input
-          className="input"
-          maxLength={100}
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Ăn trưa, tiền xăng…"
-          aria-label="Chi tiêu gì"
-          required
-        />
+      <div>
+        <label className="label" htmlFor="title">
+          Chi tiêu gì?
+        </label>
+        <div className="field">
+          <Icon name="receipt" />
+          <input
+            id="title"
+            className="input"
+            maxLength={100}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Ăn trưa, tiền xăng…"
+            required
+          />
+        </div>
       </div>
 
-      <div className="field">
-        <Icon name="coins" />
-        <input
-          className="input"
-          inputMode="numeric"
-          value={amountText}
-          onChange={(e) => setAmountText(e.target.value)}
-          placeholder="120000"
-          aria-label="Số tiền (đồng)"
-          required
-        />
+      <div>
+        <label className="label" htmlFor="amount">
+          Số tiền (đ)
+        </label>
+        <div className="field">
+          <Icon name="coins" />
+          <input
+            id="amount"
+            className="input"
+            inputMode="numeric"
+            value={amountText}
+            onChange={(e) => setAmountText(e.target.value)}
+            placeholder="120000"
+            required
+          />
+        </div>
       </div>
 
       <div className="stack">
-        <span className="meta" title="Ai trả">
+        <span className="label meta">
           <Icon name="wallet" size={18} />
+          Ai trả?
         </span>
         <div className="row" role="radiogroup" aria-label="Ai trả">
           {selectable.map((m) => (
@@ -212,20 +223,27 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
 
       <div className="stack">
         <div className="row row-between row-nowrap">
-          <span className="meta" title="Chia cho ai">
+          <span className="label meta">
             <Icon name="users" size={18} />
-            {participants.size}
+            Chia cho ai? ({participants.size})
           </span>
           <span className="row row-nowrap">
             <IconButton
               icon="check"
-              label="Chọn tất cả"
+              label="Tất cả"
               variant="ghost"
+              showLabel
               onClick={() =>
                 setParticipants(new Set(selectable.filter((m) => !m.removedAt).map((m) => m.id)))
               }
             />
-            <IconButton icon="x" label="Bỏ chọn" variant="ghost" onClick={() => setParticipants(new Set())} />
+            <IconButton
+              icon="x"
+              label="Bỏ chọn"
+              variant="ghost"
+              showLabel
+              onClick={() => setParticipants(new Set())}
+            />
           </span>
         </div>
         <div className="row" role="group" aria-label="Chia cho ai">
@@ -244,48 +262,52 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
       </div>
 
       {preview.length > 0 && (
-        <div className="meta" title="Mỗi người">
+        <div className="meta">
           <Icon name="scale" size={16} />
-          {preview.map((s) => `${nameOf(s.memberId)} ${formatVnd(s.amount)}`).join(" · ")}
+          Mỗi người: {preview.map((s) => `${nameOf(s.memberId)} ${formatVnd(s.amount)}`).join(" · ")}
         </div>
       )}
 
-      <div className="field">
-        <Icon name="clock" />
-        <input
-          className="input"
-          type="datetime-local"
-          value={spentAt}
-          onChange={(e) => setSpentAt(e.target.value)}
-          aria-label="Thời gian"
-          required
-        />
+      <div>
+        <label className="label" htmlFor="spent-at">
+          Thời gian
+        </label>
+        <div className="field">
+          <Icon name="clock" />
+          <input
+            id="spent-at"
+            className="input"
+            type="datetime-local"
+            value={spentAt}
+            onChange={(e) => setSpentAt(e.target.value)}
+            required
+          />
+        </div>
       </div>
 
-      <div className="field">
-        <Icon name="note" />
-        <input
-          className="input"
-          maxLength={500}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Ghi chú"
-          aria-label="Ghi chú (không bắt buộc)"
-        />
+      <div>
+        <label className="label" htmlFor="note">
+          Ghi chú (không bắt buộc)
+        </label>
+        <div className="field">
+          <Icon name="note" />
+          <input
+            id="note"
+            className="input"
+            maxLength={500}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </div>
       </div>
 
       {error && <p className="error">{error}</p>}
 
       <div className="row row-between">
-        <IconButton icon="x" label="Hủy" onClick={() => router.push(listHref)} />
-        <button
-          className="btn btn-icon btn-primary"
-          type="submit"
-          disabled={saving}
-          aria-label={expenseId ? "Lưu thay đổi" : "Thêm chi tiêu"}
-          title={expenseId ? "Lưu thay đổi" : "Thêm chi tiêu"}
-        >
+        <IconButton icon="x" label="Hủy" showLabel onClick={() => router.push(listHref)} />
+        <button className="btn btn-primary" type="submit" disabled={saving}>
           <Icon name="check" />
+          <span>{saving ? "Đang lưu…" : expenseId ? "Lưu thay đổi" : "Thêm chi tiêu"}</span>
         </button>
       </div>
     </form>

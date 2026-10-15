@@ -92,14 +92,16 @@ export default function MembersPage() {
         <div className="card row row-between row-nowrap">
           <span className="meta">
             <Icon name="key" />
+            <span>Mã mời</span>
             <code style={{ fontSize: "1.25rem", letterSpacing: "0.1em", color: "var(--text)" }}>
               {group.inviteCode}
             </code>
           </span>
           <IconButton
             icon={copied ? "check" : "copy"}
-            label="Sao chép mã mời"
+            label={copied ? "Đã chép" : "Sao chép"}
             variant="ghost"
+            showLabel
             onClick={() => void copyCode(group.inviteCode)}
           />
         </div>
@@ -114,16 +116,16 @@ export default function MembersPage() {
                 <strong className="truncate">{member.name}</strong>
                 {member.username && <span className="muted truncate">@{member.username}</span>}
                 {group?.myMemberId === member.id && (
-                  <span className="badge" title="Bạn" aria-label="Bạn">
-                    <Icon name="check" size={14} />
-                  </span>
+                  <span className="badge">Bạn</span>
                 )}
               </span>
               {group?.myMemberId !== member.id && (
                 <IconButton
                   icon="trash"
-                  label={`Xóa ${member.name}`}
+                  label="Xóa"
+                  title={`Xóa ${member.name}`}
                   variant="danger"
+                  showLabel
                   onClick={() => void handleRemove(member)}
                 />
               )}
@@ -133,19 +135,29 @@ export default function MembersPage() {
       )}
 
       <form className="card stack" onSubmit={handleAdd}>
-        <div className="row row-nowrap">
+        <strong className="row row-nowrap">
+          <Icon name="userPlus" />
+          <span>Thêm bạn</span>
+        </strong>
+        <div className="row">
           <IconButton
             icon="user"
-            label="Thêm bạn chỉ bằng tên"
+            label="Chỉ có tên"
+            title="Thêm bạn chỉ bằng tên (không cần tài khoản)"
             variant={mode === "name" ? "primary" : "default"}
+            showLabel
             onClick={() => setMode("name")}
           />
           <IconButton
             icon="at"
-            label="Thêm bạn từ tài khoản"
+            label="Có tài khoản"
+            title="Thêm bạn đã đăng ký tài khoản"
             variant={mode === "username" ? "primary" : "default"}
+            showLabel
             onClick={() => setMode("username")}
           />
+        </div>
+        <div className="row row-nowrap">
           <div className="field">
             <Icon name={mode === "name" ? "user" : "at"} />
             <input
@@ -159,8 +171,9 @@ export default function MembersPage() {
               required
             />
           </div>
-          <button className="btn btn-icon btn-primary" type="submit" disabled={adding} aria-label="Thêm" title="Thêm">
+          <button className="btn btn-primary" type="submit" disabled={adding}>
             <Icon name="userPlus" />
+            <span>Thêm</span>
           </button>
         </div>
       </form>

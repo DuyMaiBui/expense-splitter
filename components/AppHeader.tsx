@@ -7,7 +7,7 @@ import { useState } from "react";
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 
-/** App-wide header: home icon plus the logout control. Icon-only; meaning is in aria-label. */
+/** App-wide header: brand (home) and logout, each an icon with its name beside it. */
 export function AppHeader() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -27,10 +27,11 @@ export function AppHeader() {
     <header className="app-header">
       <div className="container">
         {/* prefetch off: every speculative prefetch is a billed Worker invocation */}
-        <Link className="brand" href="/groups" prefetch={false} aria-label="Nhóm của tôi" title="Nhóm của tôi">
-          <Icon name="wallet" size={26} />
+        <Link className="brand row row-nowrap" href="/groups" prefetch={false} title="Nhóm của tôi">
+          <Icon name="wallet" size={24} />
+          <span>Chia tiền nhóm</span>
         </Link>
-        <IconButton icon="logout" label="Đăng xuất" variant="ghost" onClick={handleLogout} disabled={busy} />
+        <IconButton icon="logout" label="Đăng xuất" variant="ghost" showLabel onClick={handleLogout} disabled={busy} />
       </div>
     </header>
   );

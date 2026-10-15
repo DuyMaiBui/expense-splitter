@@ -81,23 +81,13 @@ export default function RegisterPage() {
         </div>
         {error && <p className="error">{error}</p>}
         <div className="row row-between">
-          <Link
-            className="btn btn-icon btn-ghost"
-            href="/login"
-            prefetch={false}
-            aria-label="Đã có tài khoản, đăng nhập"
-            title="Đã có tài khoản, đăng nhập"
-          >
+          <Link className="btn btn-ghost" href="/login" prefetch={false}>
             <Icon name="login" />
+            <span>Đã có tài khoản</span>
           </Link>
-          <button
-            className="btn btn-primary"
-            type="submit"
-            disabled={busy}
-            aria-label="Tạo tài khoản"
-            title="Tạo tài khoản"
-          >
+          <button className="btn btn-primary" type="submit" disabled={busy}>
             <Icon name="check" />
+            <span>Tạo tài khoản</span>
           </button>
         </div>
       </form>
