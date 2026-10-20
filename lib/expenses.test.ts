@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { assertMembersAllowed, parseExpenseInput, type ExpenseInput } from "./expenses";
+import { assertMembersAllowed, assertPaymentShape, parseExpenseInput, type ExpenseInput } from "./expenses";
 import type { Expense, Member } from "./types";
 
 const valid = {
@@ -21,7 +21,38 @@ const codeOf = (fn: () => unknown): string | undefined => {
 
 describe("parseExpenseInput", () => {
   it("accepts a minimal body and defaults optional fields", () => {
-    expect(parseExpenseInput(valid)).toEqual({ ...valid, spentAt: null, note: null });
+    expect(parseExpenseInput(valid)).toEqual({ ...valid, spentAt: null, note: null, kind: "expense" });
+  });
+
+  it("defaults kind to expense and keeps an explicit payment", () => {
+    expect(parseExpenseInput(valid).kind).toBe("expense");
+    expect(
+      parseExpenseInput({ ...valid, kind: "payment", participantMemberIds: ["m2"] }).kind,
+    ).toBe("payment");
+  });
+
+  it.each([
+    ["an unknown kind", { ...valid, kind: "transfer" }],
+    ["a non-string kind", { ...valid, kind: 1 }],
+  ])("rejects %s with VALIDATION", (_label, body) => {
+    expect(codeOf(() => parseExpenseInput(body))).toBe("VALIDATION");
+  });
+
+  it("enforces the payment shape: exactly one receiver, never the payer", () => {
+    expect(codeOf(() => parseExpenseInput({ ...valid, kind: "payment" }))).toBe("VALIDATION");
+    expect(
+      codeOf(() =>
+        parseExpenseInput({ ...valid, kind: "payment", participantMemberIds: ["m1"] }),
+      ),
+    ).toBe("VALIDATION");
+    expect(
+      codeOf(() =>
+        parseExpenseInput({ ...valid, kind: "payment", participantMemberIds: ["m1", "m2"] }),
+      ),
+    ).toBe("VALIDATION");
+    expect(
+      codeOf(() => parseExpenseInput({ ...valid, kind: "payment", participantMemberIds: ["m2"] })),
+    ).toBeUndefined();
   });
 
   it("trims the title and canonicalises spentAt to UTC ISO", () => {
@@ -75,6 +106,7 @@ describe("assertMembersAllowed", () => {
     username: null,
     removedAt,
     createdAt: "2026-10-01T00:00:00.000Z",
+    bank: null,
   });
   const members = [member("m1"), member("m2"), member("gone", "2026-10-10T00:00:00.000Z")];
   const input = (over: Partial<ExpenseInput>): ExpenseInput => ({
@@ -84,6 +116,7 @@ describe("assertMembersAllowed", () => {
     participantMemberIds: ["m1", "m2"],
     spentAt: null,
     note: null,
+    kind: "expense",
     ...over,
   });
   const existing = {
@@ -125,5 +158,44 @@ describe("assertMembersAllowed", () => {
     const other = [...members, member("gone2", "2026-10-11T00:00:00.000Z")];
     const edit = input({ participantMemberIds: ["m1", "gone2"] });
     expect(codeOf(() => assertMembersAllowed(other, edit, existing))).toBe("VALIDATION");
+  });
+});
+
+describe("assertPaymentShape", () => {
+  it("accepts one receiver who is not the payer", () => {
+    expect(
+      codeOf(() =>
+        assertPaymentShape({ kind: "payment", paidByMemberId: "m1", participantMemberIds: ["m2"] }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("rejects zero or several receivers", () => {
+    expect(
+      codeOf(() =>
+        assertPaymentShape({ kind: "payment", paidByMemberId: "m1", participantMemberIds: [] }),
+      ),
+    ).toBe("VALIDATION");
+    expect(
+      codeOf(() =>
+        assertPaymentShape({ kind: "payment", paidByMemberId: "m1", participantMemberIds: ["m2", "m3"] }),
+      ),
+    ).toBe("VALIDATION");
+  });
+
+  it("rejects the payer paying themselves", () => {
+    expect(
+      codeOf(() =>
+        assertPaymentShape({ kind: "payment", paidByMemberId: "m1", participantMemberIds: ["m1"] }),
+      ),
+    ).toBe("VALIDATION");
+  });
+
+  it("leaves an ordinary expense unconstrained", () => {
+    expect(
+      codeOf(() =>
+        assertPaymentShape({ kind: "expense", paidByMemberId: "m1", participantMemberIds: ["m1", "m2"] }),
+      ),
+    ).toBeUndefined();
   });
 });

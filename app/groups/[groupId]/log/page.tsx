@@ -19,6 +19,7 @@ const ACTION_ICON: Record<LogAction, IconName> = {
   "member.add": "userPlus",
   "member.join": "login",
   "member.remove": "userMinus",
+  "member.bank": "bank",
   "expense.create": "plus",
   "expense.update": "pencil",
   "expense.delete": "trash",
