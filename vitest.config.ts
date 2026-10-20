@@ -10,7 +10,8 @@ export default defineConfig({
   test: {
     // lib/: pure unit tests. tests/: API route handlers run against a real SQLite database
     // that is built from migrations/0001_init.sql (see tests/helpers/d1.ts).
-    include: ["lib/**/*.test.ts", "tests/**/*.test.ts"],
+    // components/: pure chart arithmetic, import-safe without a renderer (no jsdom here).
+    include: ["lib/**/*.test.ts", "tests/**/*.test.ts", "components/**/*.test.ts"],
     environment: "node",
   },
 });
