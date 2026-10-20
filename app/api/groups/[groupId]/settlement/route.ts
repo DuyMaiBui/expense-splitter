@@ -1,6 +1,6 @@
 import { requireGroupMember, requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { listMembers } from "@/lib/group-queries";
+import { buildViewer, listMembers } from "@/lib/group-queries";
 import { ok, route } from "@/lib/http";
 import { computeTransfers, toBalances, type MemberTotals } from "@/lib/settle";
 
@@ -12,7 +12,7 @@ interface SumRow {
 export const GET = route(async (_req, ctx) => {
   const { groupId } = await ctx.params;
   const user = await requireUser();
-  await requireGroupMember(groupId, user);
+  const actor = await requireGroupMember(groupId, user);
 
   const db = getDb();
 
@@ -70,5 +70,5 @@ export const GET = route(async (_req, ctx) => {
   // SUM() over no rows is NULL; a group with no expense (or only payments) spent nothing.
   const totalSpent = spentResult?.results?.[0]?.total ?? 0;
 
-  return ok({ balances, transfers, totalSpent });
+  return ok({ balances, transfers, totalSpent, viewer: buildViewer(user, actor) });
 });

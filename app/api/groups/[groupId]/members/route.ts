@@ -2,17 +2,17 @@ import { logStatement } from "@/lib/activity";
 import { requireGroupMember, requireUser } from "@/lib/auth";
 import { getDb, newId, nowIso } from "@/lib/db";
 import { badRequest, conflict, internal, notFound } from "@/lib/errors";
-import { getMember, listMembers, sameName } from "@/lib/group-queries";
+import { buildViewer, getMember, listMembers, sameName } from "@/lib/group-queries";
 import { ok, readJson, route } from "@/lib/http";
 import { obj, str } from "@/lib/validate";
 
 export const GET = route(async (_req, ctx) => {
   const { groupId } = await ctx.params;
   const user = await requireUser();
-  await requireGroupMember(groupId, user);
+  const actor = await requireGroupMember(groupId, user);
 
   const members = await listMembers(getDb(), groupId);
-  return ok({ members });
+  return ok({ members, viewer: buildViewer(user, actor) });
 });
 
 type AddBody = { kind: "name"; name: string } | { kind: "username"; username: string };
