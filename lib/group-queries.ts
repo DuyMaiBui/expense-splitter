@@ -1,4 +1,5 @@
-import type { BankInfo, Group, Member } from "./types";
+import type { GroupMemberRef } from "./auth";
+import type { BankInfo, Group, Member, User, Viewer } from "./types";
 
 /**
  * Group and member reads shared by the group, member, expense and settlement routes.
@@ -13,25 +14,40 @@ interface MemberRow {
   removed_at: string | null;
   created_at: string;
   username: string | null;
+  is_owner: number;
   bank_bin: string | null;
   bank_account_no: string | null;
   bank_account_name: string | null;
 }
 
+/**
+ * A member's bank info comes from the linked USER's profile, never from the member row: the
+ * account belongs to the account holder, and a friend without an account (`user_id` null) has
+ * none. `isOwner` compares the member's user with the group's creator.
+ */
 const MEMBER_SELECT = `
   SELECT m.id AS id, m.group_id AS group_id, m.user_id AS user_id, m.name AS name,
          m.removed_at AS removed_at, m.created_at AS created_at, u.username AS username,
-         m.bank_bin AS bank_bin, m.bank_account_no AS bank_account_no,
-         m.bank_account_name AS bank_account_name
+         CASE WHEN m.user_id IS NOT NULL AND m.user_id = g.created_by THEN 1 ELSE 0 END AS is_owner,
+         u.bank_bin AS bank_bin, u.bank_account_no AS bank_account_no,
+         u.bank_account_name AS bank_account_name
   FROM group_members m
+  JOIN groups g ON g.id = m.group_id
   LEFT JOIN users u ON u.id = m.user_id`;
 
 /**
  * The stored bank account, or null. A row is written all-or-nothing, but a row from before the
  * feature (or a manual edit) can hold only some of the three columns: that is not a usable
  * account, so it reads as null rather than as a half-filled one.
+ *
+ * Takes the three snake_case columns, so it serves both a user row and a member row that
+ * derives them from the linked user.
  */
-export function toBankInfo(row: MemberRow): BankInfo | null {
+export function toBankInfo(row: {
+  bank_bin: string | null;
+  bank_account_no: string | null;
+  bank_account_name: string | null;
+}): BankInfo | null {
   const { bank_bin: bin, bank_account_no: accountNo, bank_account_name: accountName } = row;
   if (!bin || !accountNo || !accountName) {
     return null;
@@ -49,6 +65,7 @@ export function toMember(row: MemberRow): Member {
     removedAt: row.removed_at,
     createdAt: row.created_at,
     bank: toBankInfo(row),
+    isOwner: row.is_owner === 1,
   };
 }
 
@@ -137,6 +154,23 @@ export async function getGroupAdminView(db: D1Database, groupId: string): Promis
     .bind(groupId)
     .first<GroupRow>();
   return row ? toGroup(row) : null;
+}
+
+/**
+ * The caller relative to one group, built from their own member row (`requireGroupMember`), so
+ * every group route hands the SAME `Viewer` to lib/permissions.ts and to the response body.
+ *
+ * The admin account holds no member row: `memberId` is null and `isAdmin` is true, which
+ * `lib/permissions.ts` treats as owner-level everywhere.
+ */
+export function buildViewer(user: User, actor: GroupMemberRef): Viewer {
+  const isAdmin = user.role === "admin";
+  return {
+    userId: user.id,
+    memberId: isAdmin ? null : actor.id,
+    isOwner: actor.isOwner,
+    isAdmin,
+  };
 }
 
 // No 0/O/1/I/L: the code is read aloud and typed by hand.

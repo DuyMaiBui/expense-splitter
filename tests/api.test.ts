@@ -23,7 +23,7 @@ import { GET as groupGET } from "@/app/api/groups/[groupId]/route";
 import { DELETE as expenseDELETE, GET as expenseGET, PUT as expensePUT } from "@/app/api/groups/[groupId]/expenses/[expenseId]/route";
 import { GET as expensesGET, POST as expensesPOST } from "@/app/api/groups/[groupId]/expenses/route";
 import { GET as logGET } from "@/app/api/groups/[groupId]/log/route";
-import { DELETE as memberDELETE, PATCH as memberPATCH } from "@/app/api/groups/[groupId]/members/[memberId]/route";
+import { DELETE as memberDELETE } from "@/app/api/groups/[groupId]/members/[memberId]/route";
 import { GET as membersGET, POST as membersPOST } from "@/app/api/groups/[groupId]/members/route";
 import { DELETE as presetDELETE, PUT as presetPUT } from "@/app/api/groups/[groupId]/presets/[presetId]/route";
 import { GET as presetsGET, POST as presetsPOST } from "@/app/api/groups/[groupId]/presets/route";
@@ -137,8 +137,6 @@ const h = {
     call(c, membersPOST, { method: "POST", params: { groupId }, body }),
   removeMember: (c: Client, groupId: string, memberId: string) =>
     call(c, memberDELETE, { method: "DELETE", params: { groupId, memberId } }),
-  updateBank: (c: Client, groupId: string, memberId: string, body: unknown) =>
-    call(c, memberPATCH, { method: "PATCH", params: { groupId, memberId }, body }),
   expenses: (c: Client, groupId: string) => call(c, expensesGET, { params: { groupId } }),
   createExpense: (c: Client, groupId: string, body: unknown) =>
     call(c, expensesPOST, { method: "POST", params: { groupId }, body }),
@@ -289,6 +287,37 @@ describe("auth", () => {
     const after = await h.me(c);
     expect(after.status).toBe(401);
     expect(after.json.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("returns the caller's own bank profile on register, login and me", async () => {
+    const c = new Client();
+    const registered = await h.register(c, { username: "alice", displayName: "Alice", password: "secret1" });
+    expect(registered.json.data.user.bank).toBeNull();
+    expect((await h.me(c)).json.data.user.bank).toBeNull();
+
+    // Registering never leaks a profile into another account: only the owner's row changes.
+    const bank = { bin: "970436", accountNo: "0123456789", accountName: "NGUYEN VAN A" };
+    testDb.raw
+      .prepare(
+        "UPDATE users SET bank_bin = ?, bank_account_no = ?, bank_account_name = ? WHERE username = 'alice'",
+      )
+      .run(bank.bin, bank.accountNo, bank.accountName);
+
+    // The session cache is per isolate: a stale entry would hide a profile edit, so the login
+    // below is the fresh read the browser does after signing in again.
+    const again = new Client();
+    const loggedIn = await h.login(again, { username: "alice", password: "secret1" });
+    expect(loggedIn.json.data.user.bank).toEqual(bank);
+    expect((await h.me(again)).json.data.user.bank).toEqual(bank);
+  });
+
+  it("treats a partially stored bank profile as no profile", async () => {
+    const c = new Client();
+    await h.register(c, { username: "alice", displayName: "Alice", password: "secret1" });
+    testDb.raw.prepare("UPDATE users SET bank_bin = '970436' WHERE username = 'alice'").run();
+
+    const fresh = new Client();
+    expect((await h.login(fresh, { username: "alice", password: "secret1" })).json.data.user.bank).toBeNull();
   });
 
   it("rejects an expired session", async () => {
@@ -485,130 +514,42 @@ describe("members", () => {
     expect((await h.addMember(eve, gid, { name: "X" })).status).toBe(403);
   });
 
-  // ------------------------------------------------------------------ bank info (VietQR)
+  // ------------------------------------------------------- viewer / owner (read-only here)
 
-  const BANK = { bin: "970436", accountNo: "0123456789", accountName: "NGUYEN VAN A" };
+  it("reports the caller's owner flag on the member rows", async () => {
+    const { alice, bob, gid, aliceM, bobM, chiM } = await setup();
 
-  it("any active member can set another member's bank info, and it reads back everywhere", async () => {
-    const { bob, alice, gid, chiM } = await setup();
+    const members = (await h.members(alice, gid)).json.data.members;
+    expect(members.find((m: Json) => m.id === aliceM).isOwner).toBe(true);
+    expect(members.find((m: Json) => m.id === bobM).isOwner).toBe(false);
+    // A friend without an account can never own the group (`is_owner` needs a linked user).
+    expect(members.find((m: Json) => m.id === chiM).isOwner).toBe(false);
 
-    // Bob edits Chi (a friend with no account): membership, not ownership, is the rule.
-    const r = await h.updateBank(bob, gid, chiM, { bank: BANK });
-    expect(r.status).toBe(200);
-    expect(r.json.data.member).toMatchObject({ id: chiM, bank: BANK });
-
-    const listed = (await h.members(alice, gid)).json.data.members.find((m: Json) => m.id === chiM);
-    expect(listed.bank).toEqual(BANK);
-    const inGroup = (await h.getGroup(alice, gid)).json.data.members.find((m: Json) => m.id === chiM);
-    expect(inGroup.bank).toEqual(BANK);
+    // Every member sees the same owner, whoever asks.
+    const fromBob = (await h.members(bob, gid)).json.data.members;
+    expect(fromBob.find((m: Json) => m.id === aliceM).isOwner).toBe(true);
   });
 
-  it("defaults bank to null and clears it with an explicit null, all three columns at once", async () => {
-    const { alice, gid, chiM } = await setup();
+  it("banks are per user: a linked member row carries the owner's profile, a friend none", async () => {
+    const { alice, gid, aliceM, chiM } = await setup();
+    const BANK = { bin: "970436", accountNo: "0123456789", accountName: "NGUYEN VAN A" };
 
-    const before = (await h.members(alice, gid)).json.data.members.find((m: Json) => m.id === chiM);
-    expect(before.bank).toBeNull();
+    // There is no API to move a bank account onto a member row any more (the profile route is
+    // the API lane's); write the user's profile directly to prove the READ derives it.
+    testDb.raw
+      .prepare(
+        "UPDATE users SET bank_bin = ?, bank_account_no = ?, bank_account_name = ? WHERE username = 'alice'",
+      )
+      .run(BANK.bin, BANK.accountNo, BANK.accountName);
 
-    await h.updateBank(alice, gid, chiM, { bank: BANK });
-    const columns = () =>
-      testDb.raw
-        .prepare("SELECT bank_bin, bank_account_no, bank_account_name FROM group_members WHERE id = ?")
-        .get(chiM) as Record<string, string | null>;
-    expect(columns()).toEqual({
-      bank_bin: BANK.bin,
-      bank_account_no: BANK.accountNo,
-      bank_account_name: BANK.accountName,
-    });
-
-    const cleared = await h.updateBank(alice, gid, chiM, { bank: null });
-    expect(cleared.status).toBe(200);
-    expect(cleared.json.data.member.bank).toBeNull();
-    expect(columns()).toEqual({ bank_bin: null, bank_account_no: null, bank_account_name: null });
+    const members = (await h.members(alice, gid)).json.data.members;
+    expect(members.find((m: Json) => m.id === aliceM).bank).toEqual(BANK);
+    expect(members.find((m: Json) => m.id === chiM).bank).toBeNull();
   });
 
-  it("logs member.bank with before/after in the same batch as the update", async () => {
-    const { alice, gid, chiM } = await setup();
-
-    await h.updateBank(alice, gid, chiM, { bank: BANK });
-    let entry = (await h.log(alice, gid)).json.data.entries.find((x: Json) => x.action === "member.bank");
-    expect(entry).toMatchObject({ entityType: "member", entityId: chiM, actorName: "Alice" });
-    expect(entry.summary).toBe('Alice đã cập nhật tài khoản ngân hàng của "Chi"');
-    expect(entry.detail).toEqual({ before: null, after: BANK });
-
-    await h.updateBank(alice, gid, chiM, { bank: null });
-    entry = (await h.log(alice, gid)).json.data.entries.find((x: Json) => x.action === "member.bank");
-    expect(entry.detail).toEqual({ before: BANK, after: null });
-  });
-
-  it("rejects a malformed bank account with 400 VALIDATION and stores nothing", async () => {
-    const { alice, gid, chiM } = await setup();
-
-    const invalid = [
-      {},
-      { bank: undefined },
-      { bank: { bin: "12345", accountNo: "0123456789", accountName: "A" } },
-      { bank: { bin: "abcdef", accountNo: "0123456789", accountName: "A" } },
-      { bank: { bin: "970436", accountNo: "12345", accountName: "A" } },
-      { bank: { bin: "970436", accountNo: "0123abcd", accountName: "A" } },
-      { bank: { bin: "970436", accountNo: "0123456789", accountName: "   " } },
-      { bank: { bin: "970436", accountNo: "0123456789" } },
-      { bank: "970436" },
-    ];
-    for (const body of invalid) {
-      const r = await h.updateBank(alice, gid, chiM, body);
-      expect(r.status, JSON.stringify(body)).toBe(400);
-      expect(r.json.error.code).toBe("VALIDATION");
-    }
-
-    expect(count("SELECT COUNT(*) AS c FROM group_members WHERE bank_bin IS NOT NULL")).toBe(0);
-    expect((await h.log(alice, gid)).json.data.entries.some((x: Json) => x.action === "member.bank")).toBe(
-      false,
-    );
-  });
-
-  it("trims the account name, as every stored string is trimmed", async () => {
-    const { alice, gid, chiM } = await setup();
-    const r = await h.updateBank(alice, gid, chiM, {
-      bank: { ...BANK, accountName: "  Nguyen Van A  " },
-    });
-    expect(r.json.data.member.bank.accountName).toBe("Nguyen Van A");
-  });
-
-  it("404s for a removed or unknown member", async () => {
-    const { alice, gid, chiM } = await setup();
-
-    expect((await h.updateBank(alice, gid, "no-such-member", { bank: BANK })).status).toBe(404);
-    await h.removeMember(alice, gid, chiM);
-    const gone = await h.updateBank(alice, gid, chiM, { bank: BANK });
-    expect(gone.status).toBe(404);
-    expect(gone.json.error.code).toBe("NOT_FOUND");
-  });
-
-  it("404s for a member of another group and 403s for a non-member caller", async () => {
-    const { alice, gid, chiM } = await setup();
-    const other = (await h.createGroup(alice, "Khác")).json.data.group;
-
-    expect((await h.updateBank(alice, other.id, chiM, { bank: BANK })).status).toBe(404);
-
-    const eve = new Client();
-    await h.register(eve, { username: "eve", displayName: "Eve", password: "secret3" });
-    expect((await h.updateBank(eve, gid, chiM, { bank: BANK })).status).toBe(403);
-    expect((await h.updateBank(new Client(), gid, chiM, { bank: BANK })).status).toBe(401);
-  });
-
-  it("the admin edits bank info as Quản trị viên", async () => {
-    const { gid, bobM } = await setup();
-    testDb.raw.exec(await buildAdminSql({ username: "admin", password: "Adm1n-passw0rd-long" }));
-    const admin = new Client();
-    await h.login(admin, { username: "admin", password: "Adm1n-passw0rd-long" });
-
-    expect((await h.updateBank(admin, gid, bobM, { bank: BANK })).status).toBe(200);
-    const member = (await h.members(admin, gid)).json.data.members.find((m: Json) => m.id === bobM);
-    expect(member.bank).toEqual(BANK);
-    const entry = (await h.log(admin, gid)).json.data.entries.find(
-      (x: Json) => x.action === "member.bank",
-    );
-    expect(entry.actorName).toBe("Quản trị viên");
+  it("has no PATCH on a member: the bank account is not group-scoped any more", async () => {
+    const route = await import("@/app/api/groups/[groupId]/members/[memberId]/route");
+    expect("PATCH" in route).toBe(false);
   });
 });
 

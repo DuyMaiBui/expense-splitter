@@ -78,6 +78,8 @@ export const POST = route(async (req) => {
     displayName: body.displayName,
     role: "user",
     createdAt,
+    // A fresh account has no bank profile; it is set later through PUT /api/profile/bank.
+    bank: null,
   };
   return ok({ user }, 201);
 }, { limit: "auth" }); // also caps account-spam writes to D1
