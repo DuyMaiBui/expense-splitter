@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { generateInviteCode, sameName, toMember } from "./group-queries";
+import { buildViewer, generateInviteCode, sameName, toMember } from "./group-queries";
+import type { GroupMemberRef } from "./auth";
+import type { User } from "./types";
 
 type MemberRowInput = Parameters<typeof toMember>[0];
 
@@ -12,6 +14,7 @@ const row = (over: Partial<MemberRowInput> = {}): MemberRowInput => ({
   removed_at: null,
   created_at: "2026-10-01T00:00:00.000Z",
   username: null,
+  is_owner: 0,
   bank_bin: null,
   bank_account_no: null,
   bank_account_name: null,
@@ -59,6 +62,7 @@ describe("toMember", () => {
       removedAt: null,
       createdAt: "2026-10-01T00:00:00.000Z",
       bank: null,
+      isOwner: false,
     });
   });
 
@@ -73,5 +77,50 @@ describe("toMember", () => {
     expect(toMember(row({ bank_bin: "970436", bank_account_no: null, bank_account_name: "CHI" })).bank).toBeNull();
     expect(toMember(row({ bank_bin: null, bank_account_no: "0123456789", bank_account_name: "CHI" })).bank).toBeNull();
     expect(toMember(row({ bank_bin: "970436", bank_account_no: "0123456789", bank_account_name: null })).bank).toBeNull();
+  });
+
+  it("flags the owner's member row only", () => {
+    expect(toMember(row({ is_owner: 1 })).isOwner).toBe(true);
+    expect(toMember(row({ is_owner: 0 })).isOwner).toBe(false);
+  });
+});
+
+describe("buildViewer", () => {
+  const user = (over: Partial<User> = {}): User => ({
+    id: "u-alice",
+    username: "alice",
+    displayName: "Alice",
+    role: "user",
+    createdAt: "2026-10-01T00:00:00.000Z",
+    bank: null,
+    ...over,
+  });
+
+  const actor = (over: Partial<GroupMemberRef> = {}): GroupMemberRef => ({
+    id: "m-alice",
+    groupId: "g1",
+    name: "Alice",
+    isOwner: false,
+    ...over,
+  });
+
+  it("marks a plain member as neither owner nor admin", () => {
+    expect(buildViewer(user(), actor())).toEqual({
+      userId: "u-alice",
+      memberId: "m-alice",
+      isOwner: false,
+      isAdmin: false,
+    });
+  });
+
+  it("carries the owner flag read from groups.created_by", () => {
+    expect(buildViewer(user(), actor({ isOwner: true })).isOwner).toBe(true);
+  });
+
+  it("gives the admin account no member row and the admin flag", () => {
+    // requireGroupMember reports the admin as owner-level, and the Viewer keeps isAdmin
+    // separately so lib/permissions.ts never has to guess.
+    const viewer = buildViewer(user({ id: "u-admin", role: "admin" }), actor({ id: "admin:u-admin", isOwner: true }));
+    expect(viewer).toEqual({ userId: "u-admin", memberId: null, isOwner: true, isAdmin: true });
   });
 });

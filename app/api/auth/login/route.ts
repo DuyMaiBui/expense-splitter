@@ -1,6 +1,7 @@
 import { createSession, hashPassword, verifyPassword } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { forbidden, unauthorized } from "@/lib/errors";
+import { toBankInfo } from "@/lib/group-queries";
 import { ok, readJson, route } from "@/lib/http";
 import type { User, UserRole } from "@/lib/types";
 import { obj, str } from "@/lib/validate";
@@ -14,6 +15,9 @@ interface LoginRow {
   role: UserRole;
   banned_at: string | null;
   created_at: string;
+  bank_bin: string | null;
+  bank_account_no: string | null;
+  bank_account_name: string | null;
 }
 
 export const POST = route(async (req) => {
@@ -27,7 +31,8 @@ export const POST = route(async (req) => {
 
   const row = await getDb()
     .prepare(
-      `SELECT id, username, display_name, password_hash, password_salt, role, banned_at, created_at
+      `SELECT id, username, display_name, password_hash, password_salt, role, banned_at,
+              created_at, bank_bin, bank_account_no, bank_account_name
        FROM users WHERE username = ?`,
     )
     .bind(body.username)
@@ -58,6 +63,7 @@ export const POST = route(async (req) => {
     displayName: row.display_name,
     role: row.role,
     createdAt: row.created_at,
+    bank: toBankInfo(row),
   };
   return ok({ user });
 }, { limit: "auth" }); // brute-force guard: PBKDF2 makes every attempt CPU-expensive

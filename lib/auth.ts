@@ -2,7 +2,8 @@ import { cookies } from "next/headers";
 
 import { getDb, newId, nowIso } from "./db";
 import { forbidden, notFound, unauthorized } from "./errors";
-import type { User, UserRole } from "./types";
+import { toBankInfo } from "./group-queries";
+import type { User, UserRole, Viewer } from "./types";
 
 /**
  * Authentication: password hashing, session lifecycle and the request auth guards.
@@ -210,6 +211,9 @@ interface UserRow {
   banned_at: string | null;
   created_at: string;
   expires_at: string;
+  bank_bin: string | null;
+  bank_account_no: string | null;
+  bank_account_name: string | null;
 }
 
 function toUser(row: UserRow): User {
@@ -219,6 +223,7 @@ function toUser(row: UserRow): User {
     displayName: row.display_name,
     role: row.role,
     createdAt: row.created_at,
+    bank: toBankInfo(row),
   };
 }
 
@@ -251,7 +256,9 @@ export async function getCurrentUser(): Promise<User | null> {
   const row = await getDb()
     .prepare(
       `SELECT u.id AS id, u.username AS username, u.display_name AS display_name,
-              u.role AS role, u.banned_at AS banned_at, u.created_at AS created_at, s.expires_at AS expires_at
+              u.role AS role, u.banned_at AS banned_at, u.created_at AS created_at,
+              u.bank_bin AS bank_bin, u.bank_account_no AS bank_account_no,
+              u.bank_account_name AS bank_account_name, s.expires_at AS expires_at
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.id = ? AND s.expires_at > ?`,
@@ -314,24 +321,31 @@ export function forgetUserSessions(userId: string): void {
 /** How the admin account appears in group logs and summaries. */
 export const ADMIN_ACTOR_NAME = "Quản trị viên";
 
-/** The caller's own active member row in a group. */
+/** The caller's own active member row in a group, plus what a `Viewer` needs. */
 export interface GroupMemberRef {
   id: string;
   groupId: string;
   name: string;
+  /** Whether the caller is the group's owner (`groups.created_by`). */
+  isOwner: boolean;
 }
 
 /**
  * Confirms the group exists and the caller is one of its active members, returning the
  * caller's member row. NOT_FOUND when the group does not exist, FORBIDDEN when the caller
  * is not an active member.
+ *
+ * `isOwner` is read from `groups.created_by` in the same round trip, so a route can hand a
+ * `Viewer` to lib/permissions.ts without a second read.
  */
 export async function requireGroupMember(groupId: string, user: User): Promise<GroupMemberRef> {
-  // One round trip tells the two failures apart: no group row = NOT_FOUND, group row but no
-  // active membership = FORBIDDEN. Both lookups are primary-key / unique-index probes.
+  // One round trip tells the failures apart and carries the owner flag: no group row =
+  // NOT_FOUND, a group row but no active membership = FORBIDDEN. Both lookups are
+  // primary-key / unique-index probes.
   const row = await getDb()
     .prepare(
-      `SELECT g.id AS group_id, g.deleted_at AS deleted_at, m.id AS member_id, m.name AS member_name
+      `SELECT g.id AS group_id, g.deleted_at AS deleted_at, g.created_by AS created_by,
+              m.id AS member_id, m.name AS member_name
        FROM groups g
        LEFT JOIN group_members m
          ON m.group_id = g.id AND m.user_id = ? AND m.removed_at IS NULL
@@ -341,6 +355,7 @@ export async function requireGroupMember(groupId: string, user: User): Promise<G
     .first<{
       group_id: string;
       deleted_at: string | null;
+      created_by: string;
       member_id: string | null;
       member_name: string | null;
     }>();
@@ -353,7 +368,12 @@ export async function requireGroupMember(groupId: string, user: User): Promise<G
   // "Quản trị viên" actor, so each existing group route works for it unchanged and every
   // change it makes lands in the group's activity log under that name.
   if (user.role === "admin") {
-    return { id: `admin:${user.id}`, groupId: row.group_id, name: ADMIN_ACTOR_NAME };
+    return {
+      id: `admin:${user.id}`,
+      groupId: row.group_id,
+      name: ADMIN_ACTOR_NAME,
+      isOwner: true,
+    };
   }
   if (row.deleted_at !== null) {
     throw notFound("Không tìm thấy nhóm.");
@@ -362,5 +382,10 @@ export async function requireGroupMember(groupId: string, user: User): Promise<G
     throw forbidden("Bạn không phải là thành viên của nhóm này.");
   }
 
-  return { id: row.member_id, groupId: row.group_id, name: row.member_name };
+  return {
+    id: row.member_id,
+    groupId: row.group_id,
+    name: row.member_name,
+    isOwner: row.created_by === user.id,
+  };
 }

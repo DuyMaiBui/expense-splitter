@@ -6,13 +6,20 @@
 /** `admin` is a dedicated account that only re-issues passwords; it never joins groups. */
 export type UserRole = "user" | "admin";
 
-/** A registered account. */
+/**
+ * A registered account.
+ *
+ * `bank` is the caller's OWN receiving account (never another user's): it is returned by
+ * register/login/me and edited only through PUT /api/profile/bank. Member rows elsewhere carry
+ * the same account, derived from the linked user.
+ */
 export interface User {
   id: string;
   username: string;
   displayName: string;
   role: UserRole;
   createdAt: string;
+  bank: BankInfo | null;
 }
 
 /** The minimum an admin response needs to name an account. */
@@ -72,7 +79,7 @@ export interface Group {
 }
 
 /**
- * The bank account a member receives transfers on, used to render a VietQR payment code.
+ * The receiving account of a USER's profile, used to render a VietQR payment code.
  * `bin` is a 6-digit NAPAS BIN, `accountNo` 6..19 digits, `accountName` 1..50 characters.
  */
 export interface BankInfo {
@@ -84,7 +91,10 @@ export interface BankInfo {
 /**
  * A group member. `userId`/`username` are null for a friend added without an account.
  * `removedAt` is set on a soft delete (removed members stay readable).
- * `bank` is null until every one of the three stored bank columns is set.
+ *
+ * `bank` is DERIVED from the member's linked user (LEFT JOIN users) and is always null for a
+ * friend without an account: a member owns no bank info of its own. `isOwner` is true for the
+ * one member whose `userId` matches `groups.created_by`.
  */
 export interface Member {
   id: string;
@@ -95,6 +105,19 @@ export interface Member {
   removedAt: string | null;
   createdAt: string;
   bank: BankInfo | null;
+  isOwner: boolean;
+}
+
+/**
+ * The caller relative to ONE group, returned alongside every group-scoped read so the UI can
+ * decide what to show without a second request. `memberId` is null for the admin account (it
+ * holds no member row); `isAdmin` is true for it and it counts as owner-level everywhere.
+ */
+export interface Viewer {
+  userId: string;
+  memberId: string | null;
+  isOwner: boolean;
+  isAdmin: boolean;
 }
 
 /** One member's portion of an expense. */
@@ -213,6 +236,10 @@ export interface GroupStats {
   members: StatsMember[];
 }
 
+/**
+ * `member.bank` is no longer written (bank info is the user's profile, not a group-scoped
+ * change); it stays in the union so historical log rows still render.
+ */
 export type LogAction =
   | "group.create"
   | "member.add"

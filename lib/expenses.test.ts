@@ -107,6 +107,7 @@ describe("assertMembersAllowed", () => {
     removedAt,
     createdAt: "2026-10-01T00:00:00.000Z",
     bank: null,
+    isOwner: false,
   });
   const members = [member("m1"), member("m2"), member("gone", "2026-10-10T00:00:00.000Z")];
   const input = (over: Partial<ExpenseInput>): ExpenseInput => ({
