@@ -1,12 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 
-import { BankInfoForm } from "@/components/BankInfoForm";
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import { formatVnd } from "@/lib/format";
-import type { Expense, Member, Transfer } from "@/lib/types";
+import { canRecordPayment } from "@/lib/permissions";
+import type { Expense, Member, Transfer, Viewer } from "@/lib/types";
 import { bankByBin, buildVietQrUrl, sanitizeTransferNote } from "@/lib/vietqr";
 
 interface PaymentQrDialogProps {
@@ -16,15 +17,15 @@ interface PaymentQrDialogProps {
   payer: Member;
   /** The member who receives it. */
   receiver: Member;
+  /** The caller relative to this group: decides whether the payment can be recorded. */
+  viewer: Viewer;
   /** Dismiss: the caller clears the selected transfer. */
   onClose: () => void;
-  /** The receiver's account was just saved, so the caller's member list is stale. */
-  onBankSaved: (member: Member) => void;
   /** The payment was recorded: the caller reloads settlement, closes and reports it. */
   onPaid: (notice: string) => void;
   /**
-   * Open straight at the confirm step ("Đã thanh toán" on the row). The QR stays above it, so
-   * the payer can still scan; without a bank account the dialog starts at the bank form.
+   * Open straight at the confirm step ("Đã thanh toán" on the row). The QR stays above it when
+   * the receiver has an account; without one there is simply no code to show.
    */
   startAtConfirm?: boolean;
 }
@@ -38,29 +39,44 @@ function paymentTitle(payerName: string, receiverName: string): string {
 }
 
 /**
- * One settlement transfer: show the receiver's VietQR code, let the receiver's account be
- * filled in first when it is missing, then record the payment after an explicit confirmation.
- * A payment row is an ordinary payer/receiver split, so settlement drops that debt itself.
+ * Why the receiver has no code — and who can do something about it.
+ *
+ * Bank info belongs to a user's own profile, so a friend added by name has none and cannot get
+ * one; a linked account has simply not filled it in yet. Only the receiver themself can fix it.
+ */
+function missingBankNotice(receiver: Member, viewer: Viewer): string {
+  if (receiver.id === viewer.memberId) {
+    return "Bạn chưa cài tài khoản nhận tiền";
+  }
+  if (receiver.userId === null) {
+    return `${receiver.name} không có tài khoản trong ứng dụng nên chưa tạo được mã QR`;
+  }
+  return `${receiver.name} chưa cài tài khoản nhận tiền, hãy nhờ họ cập nhật ở Hồ sơ`;
+}
+
+/**
+ * One settlement transfer: show the receiver's VietQR code when their profile has one, then
+ * record the payment after an explicit confirmation. A payment row is an ordinary payer/receiver
+ * split, so settlement drops that debt itself — and it records a cash/other-channel payment just
+ * as well, so a missing bank never blocks it.
  */
 export function PaymentQrDialog({
   groupId,
   transfer,
   payer,
   receiver,
+  viewer,
   onClose,
-  onBankSaved,
   onPaid,
   startAtConfirm = false,
 }: PaymentQrDialogProps) {
   const titleId = useId();
-  // The account can be filled in from here, so the receiver is local state from the start.
-  const [payee, setPayee] = useState<Member>(receiver);
   const [copied, setCopied] = useState(false);
-  const [confirming, setConfirming] = useState(startAtConfirm && receiver.bank !== null);
+  const [confirming, setConfirming] = useState(startAtConfirm);
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const bank = payee.bank;
+  const bank = receiver.bank;
   const bankEntry = bank ? bankByBin(bank.bin) : undefined;
   const note = sanitizeTransferNote(payer.name) || "Thanh toan";
   // buildVietQrUrl rejects an amount outside 1..1e12: an absurd settlement is shown without a
@@ -82,11 +98,14 @@ export function PaymentQrDialog({
     }
   })();
 
-  // A removed member cannot be part of a new expense, so the API would refuse the payment:
-  // say so up front instead of failing after the scan.
+  // The route refuses a recording by anyone but the two parties, the owner or the admin: say so
+  // up front instead of failing after the scan.
+  const mayRecord = canRecordPayment(viewer, payer.id, receiver.id);
+
+  // A removed member cannot be part of a new expense, so the API would refuse the payment too.
   const blockReason =
-    payee.removedAt !== null
-      ? `${payee.name} đã rời nhóm nên chưa ghi nhận được khoản thanh toán trong ứng dụng.`
+    receiver.removedAt !== null
+      ? `${receiver.name} đã rời nhóm nên chưa ghi nhận được khoản thanh toán trong ứng dụng.`
       : payer.removedAt !== null
         ? `${payer.name} đã rời nhóm nên chưa ghi nhận được khoản thanh toán trong ứng dụng.`
         : null;
@@ -123,12 +142,6 @@ export function PaymentQrDialog({
     }
   }
 
-  function handleBankSaved(member: Member): void {
-    setPayee(member);
-    setError(null);
-    onBankSaved(member);
-  }
-
   async function handlePay(): Promise<void> {
     setPaying(true);
     setError(null);
@@ -136,14 +149,16 @@ export function PaymentQrDialog({
       await api<{ expense: Expense }>(`/api/groups/${groupId}/expenses`, {
         method: "POST",
         body: {
-          title: paymentTitle(payer.name, payee.name),
+          title: paymentTitle(payer.name, receiver.name),
           amount: transfer.amount,
           paidByMemberId: payer.id,
-          participantMemberIds: [payee.id],
+          participantMemberIds: [receiver.id],
           kind: "payment",
         },
       });
-      onPaid(`Đã ghi nhận thanh toán ${formatVnd(transfer.amount)} từ ${payer.name} cho ${payee.name}.`);
+      onPaid(
+        `Đã ghi nhận thanh toán ${formatVnd(transfer.amount)} từ ${payer.name} cho ${receiver.name}.`,
+      );
     } catch (e) {
       setError(message(e, "Không ghi nhận được thanh toán."));
       setConfirming(false);
@@ -173,7 +188,7 @@ export function PaymentQrDialog({
           <span className="row row-nowrap">
             <strong className="truncate">{payer.name}</strong>
             <Icon name="arrowRight" size={18} />
-            <strong className="truncate">{payee.name}</strong>
+            <strong className="truncate">{receiver.name}</strong>
           </span>
           <strong className="amount dialog-amount">{formatVnd(transfer.amount)}</strong>
         </div>
@@ -182,31 +197,29 @@ export function PaymentQrDialog({
         <div className="stack dialog-body">
           {!bank ? (
             <div className="stack">
-              <p className="muted">
-                {payee.name} chưa có tài khoản nhận tiền. Điền thông tin ngân hàng để tạo mã QR.
-              </p>
-              {payee.removedAt === null ? (
-                <BankInfoForm
-                  groupId={groupId}
-                  memberId={payee.id}
-                  initial={null}
-                  submitLabel="Lưu và tạo mã QR"
-                  onSaved={handleBankSaved}
-                />
-              ) : (
-                <p className="empty">Không thể thêm tài khoản cho thành viên đã rời nhóm.</p>
+              <p className="muted">{missingBankNotice(receiver, viewer)}</p>
+              {/* Only the receiver themself can add the account, and only on their profile. */}
+              {receiver.id === viewer.memberId && (
+                <Link className="btn btn-primary self-start" href="/profile" prefetch={false}>
+                  <Icon name="bank" />
+                  <span>Cài ở Hồ sơ</span>
+                </Link>
               )}
             </div>
           ) : (
             <div className="stack">
-              {qrUrl && (
+              {qrUrl ? (
                 <img
                   className="qr-image"
                   src={qrUrl}
-                  alt={`Mã VietQR nhận ${formatVnd(transfer.amount)} cho ${payee.name}`}
+                  alt={`Mã VietQR nhận ${formatVnd(transfer.amount)} cho ${receiver.name}`}
                   width={300}
                   height={300}
                 />
+              ) : (
+                <p className="muted">
+                  Số tiền này nằm ngoài giới hạn tạo mã QR, hãy chuyển khoản theo thông tin bên dưới.
+                </p>
               )}
 
               <div className="stack">
@@ -249,11 +262,15 @@ export function PaymentQrDialog({
 
         {blockReason ? (
           <p className="muted dialog-actions">{blockReason}</p>
+        ) : !mayRecord ? (
+          <p className="muted dialog-actions">
+            Chỉ người trả, người nhận hoặc chủ nhóm ghi nhận được.
+          </p>
         ) : confirming ? (
           <div className="stack dialog-actions">
             <p className="muted">
-              Xác nhận bạn đã chuyển {formatVnd(transfer.amount)} cho {payee.name}? Khoản này được ghi
-              vào nhóm và trừ vào công nợ.
+              Xác nhận bạn đã chuyển {formatVnd(transfer.amount)} cho {receiver.name}? Khoản này được
+              ghi vào nhóm và trừ vào công nợ.
             </p>
             <div className="row row-between">
               <IconButton
@@ -275,9 +292,8 @@ export function PaymentQrDialog({
             <button
               className="btn btn-primary"
               type="button"
-              disabled={!bank}
-              title={bank ? undefined : "Cần tài khoản nhận tiền trước"}
               onClick={() => setConfirming(true)}
+              title="Ghi nhận chuyển khoản hoặc trả tiền mặt"
             >
               <Icon name="check" />
               <span>Đã thanh toán</span>
