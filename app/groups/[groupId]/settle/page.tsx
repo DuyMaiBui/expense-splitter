@@ -8,14 +8,13 @@ import { Icon, IconButton } from "@/components/Icon";
 import { PaymentQrDialog } from "@/components/PaymentQrDialog";
 import { api } from "@/lib/api-client";
 import { formatVnd } from "@/lib/format";
-import { canRecordPayment } from "@/lib/permissions";
 import type { Balance, Member, Transfer, Viewer } from "@/lib/types";
 
 interface Settlement {
   balances: Balance[];
   transfers: Transfer[];
   totalSpent: number;
-  /** The caller relative to this group: what the permission helper below evaluates. */
+  /** The caller relative to this group: the row button is shown only to the one who owes. */
   viewer: Viewer;
 }
 
@@ -58,10 +57,6 @@ export default function SettlePage() {
   const payer = selected ? memberOf(selected.fromMemberId) : null;
   const receiver = selected ? memberOf(selected.toMemberId) : null;
 
-  /** Whether the caller may record this transfer (payer, receiver, owner or admin). */
-  const canRecord = (transfer: Transfer): boolean =>
-    data ? canRecordPayment(data.viewer, transfer.fromMemberId, transfer.toMemberId) : false;
-
   function handlePaid(report: string): void {
     setSelected(null);
     setNotice(report);
@@ -95,7 +90,9 @@ export default function SettlePage() {
               <p className="empty">Mọi người đã huề, không ai nợ ai.</p>
             ) : (
               data.transfers.map((t) => {
-                const allowed = canRecord(t);
+                // Only the member who has to transfer gets the button; everyone else reads the
+                // row alone.
+                const debtor = data.viewer.memberId === t.fromMemberId;
                 return (
                   <div key={`${t.fromMemberId}-${t.toMemberId}`} className="stack transfer-row">
                     <div className="row row-between row-nowrap">
@@ -106,32 +103,25 @@ export default function SettlePage() {
                       </span>
                       <strong className="amount">{formatVnd(t.amount)}</strong>
                     </div>
-                    {/* ONE button per row: the QR and the payment confirmation both live in the
-                        dialog, in the order a payer actually does them. */}
-                    <button
-                      className={allowed ? "btn btn-primary" : "btn"}
-                      type="button"
-                      disabled={members === null}
-                      onClick={() => {
-                        setSelected(t);
-                        setNotice(null);
-                      }}
-                    >
-                      <Icon name="qr" />
-                      <span>{allowed ? "Thanh toán" : "Xem QR"}</span>
-                    </button>
-                    {!allowed && (
-                      <span className="muted">Chỉ người trả, người nhận hoặc chủ nhóm ghi nhận được.</span>
+                    {/* Only the person who owes the money gets a button: the QR and the payment
+                        confirmation both live in the dialog, in the order they do them. */}
+                    {debtor && (
+                      <button
+                        className="btn btn-primary"
+                        type="button"
+                        disabled={members === null}
+                        onClick={() => {
+                          setSelected(t);
+                          setNotice(null);
+                        }}
+                      >
+                        <Icon name="qr" />
+                        <span>Thanh toán</span>
+                      </button>
                     )}
                   </div>
                 );
               })
-            )}
-            {data.transfers.length > 0 && (
-              <p className="muted">
-                "Thanh toán" mở mã chuyển khoản; chuyển xong, bấm "Đã chuyển khoản xong" trong cửa
-                sổ đó để ghi vào nhóm.
-              </p>
             )}
           </section>
 
@@ -184,7 +174,6 @@ export default function SettlePage() {
           transfer={selected}
           payer={payer}
           receiver={receiver}
-          viewer={data.viewer}
           onClose={() => setSelected(null)}
           onPaid={handlePaid}
         />
