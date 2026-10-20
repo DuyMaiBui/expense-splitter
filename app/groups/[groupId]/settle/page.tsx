@@ -27,8 +27,9 @@ export default function SettlePage() {
   const [members, setMembers] = useState<Member[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // The row the dialog is open for, and whether it opened at the confirm step.
-  const [selected, setSelected] = useState<{ transfer: Transfer; atConfirm: boolean } | null>(null);
+  // The row the dialog is open for. Recording the payment happens inside that dialog now, so
+  // there is no "start at the confirm step" variant to carry alongside it.
+  const [selected, setSelected] = useState<Transfer | null>(null);
 
   const load = useCallback(
     async (fresh = false) => {
@@ -54,8 +55,8 @@ export default function SettlePage() {
   const nameOf = (id: string) => data?.balances.find((b) => b.memberId === id)?.name ?? "?";
   const memberOf = (id: string) => members?.find((m) => m.id === id) ?? null;
 
-  const payer = selected ? memberOf(selected.transfer.fromMemberId) : null;
-  const receiver = selected ? memberOf(selected.transfer.toMemberId) : null;
+  const payer = selected ? memberOf(selected.fromMemberId) : null;
+  const receiver = selected ? memberOf(selected.toMemberId) : null;
 
   /** Whether the caller may record this transfer (payer, receiver, owner or admin). */
   const canRecord = (transfer: Transfer): boolean =>
@@ -105,45 +106,31 @@ export default function SettlePage() {
                       </span>
                       <strong className="amount">{formatVnd(t.amount)}</strong>
                     </div>
-                    <div className="row row-nowrap">
-                      <button
-                        className="btn"
-                        type="button"
-                        disabled={members === null}
-                        onClick={() => {
-                          setSelected({ transfer: t, atConfirm: false });
-                          setNotice(null);
-                        }}
-                      >
-                        <Icon name="qr" />
-                        <span>Tạo QR</span>
-                      </button>
-                      {allowed && (
-                        <button
-                          className="btn btn-primary"
-                          type="button"
-                          disabled={members === null}
-                          onClick={() => {
-                            setSelected({ transfer: t, atConfirm: true });
-                            setNotice(null);
-                          }}
-                        >
-                          <Icon name="check" />
-                          <span>Đã thanh toán</span>
-                        </button>
-                      )}
-                    </div>
+                    {/* ONE button per row: the QR and the payment confirmation both live in the
+                        dialog, in the order a payer actually does them. */}
+                    <button
+                      className={allowed ? "btn btn-primary" : "btn"}
+                      type="button"
+                      disabled={members === null}
+                      onClick={() => {
+                        setSelected(t);
+                        setNotice(null);
+                      }}
+                    >
+                      <Icon name="qr" />
+                      <span>{allowed ? "Thanh toán" : "Xem QR"}</span>
+                    </button>
                     {!allowed && (
                       <span className="muted">Chỉ người trả, người nhận hoặc chủ nhóm ghi nhận được.</span>
                     )}
                   </div>
                 );
               })
-            )}            {data.transfers.length > 0 && (
+            )}
+            {data.transfers.length > 0 && (
               <p className="muted">
-                "Tạo QR" mở mã chuyển khoản (chỉ có khi người nhận đã cài tài khoản nhận tiền). "Đã
-                thanh toán" hỏi lại một lần rồi ghi khoản vào nhóm, kể cả khi trả bằng tiền mặt;
-                công nợ tự giảm theo.
+                "Thanh toán" mở mã chuyển khoản; chuyển xong, bấm "Đã chuyển khoản xong" trong cửa
+                sổ đó để ghi vào nhóm.
               </p>
             )}
           </section>
@@ -194,11 +181,10 @@ export default function SettlePage() {
       {selected && payer && receiver && data && (
         <PaymentQrDialog
           groupId={groupId}
-          transfer={selected.transfer}
+          transfer={selected}
           payer={payer}
           receiver={receiver}
           viewer={data.viewer}
-          startAtConfirm={selected.atConfirm}
           onClose={() => setSelected(null)}
           onPaid={handlePaid}
         />
