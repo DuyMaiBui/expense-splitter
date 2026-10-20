@@ -178,6 +178,7 @@ export default function MembersPage() {
                         label="Rời nhóm"
                         title="Rời nhóm này"
                         variant="danger"
+                        showLabel
                         onClick={() => void handleRemove(member)}
                       />
                     )}
