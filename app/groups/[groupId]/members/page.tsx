@@ -1,20 +1,33 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-import { BankInfoForm } from "@/components/BankInfoForm";
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
-import type { Group, Member } from "@/lib/types";
+import { canRemoveMember } from "@/lib/permissions";
+import type { Group, Member, Viewer } from "@/lib/types";
 import { bankByBin } from "@/lib/vietqr";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
+/**
+ * Who a member's bank line describes. A friend added by name has no account at all, so there is
+ * nothing to configure; a linked account simply has not filled its profile in yet.
+ */
+function bankHint(member: Member): string {
+  return member.userId === null
+    ? "Không có tài khoản trong ứng dụng"
+    : "Chưa cài tài khoản nhận tiền";
+}
+
 export default function MembersPage() {
   const { groupId } = useParams<{ groupId: string }>();
+  const router = useRouter();
   const [group, setGroup] = useState<Group | null>(null);
   const [members, setMembers] = useState<Member[] | null>(null);
+  const [viewer, setViewer] = useState<Viewer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -23,16 +36,18 @@ export default function MembersPage() {
   const [adding, setAdding] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // The member whose bank account is open for editing, by id (one at a time).
-  const [editingBank, setEditingBank] = useState<string | null>(null);
-
   const load = useCallback(
     async (fresh = false) => {
       try {
-        // Same URL the nav bar uses, so this is one request (or none, when cached).
-        const data = await api<{ group: Group; members: Member[] }>(`/api/groups/${groupId}`, { fresh });
+        // Same URL the nav bar uses, so this is one request (or none, when cached). The envelope
+        // carries the caller's `viewer`, which is what the permission helpers below evaluate.
+        const data = await api<{ group: Group; members: Member[]; viewer: Viewer }>(
+          `/api/groups/${groupId}`,
+          { fresh },
+        );
         setGroup(data.group);
         setMembers(data.members);
+        setViewer(data.viewer);
         setError(null);
       } catch (e) {
         setError(message(e, "Không tải được thành viên."));
@@ -65,27 +80,26 @@ export default function MembersPage() {
   }
 
   async function handleRemove(member: Member): Promise<void> {
-    if (!window.confirm(`Xóa "${member.name}" khỏi nhóm? Lịch sử chi tiêu vẫn được giữ.`)) {
+    const isMe = viewer?.memberId === member.id;
+    const question = isMe
+      ? `Rời nhóm "${group?.name ?? ""}"? Lịch sử chi tiêu của bạn vẫn được giữ.`
+      : `Xóa "${member.name}" khỏi nhóm? Lịch sử chi tiêu vẫn được giữ.`;
+    if (!window.confirm(question)) {
       return;
     }
     setError(null);
     setNotice(null);
     try {
       await api(`/api/groups/${groupId}/members/${member.id}`, { method: "DELETE" });
+      if (isMe) {
+        // Leaving the group: this page (and every tab of it) is now forbidden.
+        router.replace("/groups");
+        return;
+      }
       await load();
     } catch (e) {
       setError(message(e, "Không xóa được thành viên."));
     }
-  }
-
-  function handleBankSaved(member: Member): void {
-    // The PATCH returned the stored member, so the row updates without another request.
-    setMembers((current) =>
-      current ? current.map((m) => (m.id === member.id ? member : m)) : current,
-    );
-    setEditingBank(null);
-    setError(null);
-    setNotice(`Đã lưu tài khoản nhận tiền của ${member.name}.`);
   }
 
   async function copyCode(code: string): Promise<void> {
@@ -130,6 +144,15 @@ export default function MembersPage() {
         <div className="card stack">
           {active.map((member) => {
             const bankEntry = member.bank ? bankByBin(member.bank.bin) : undefined;
+            const isMe = viewer?.memberId === member.id;
+            // The owner's own row is protected from everyone (including the owner), and only the
+            // owner, the admin or the member themself may remove a row — the same rule the route
+            // enforces, evaluated from the one shared helper.
+            const verdict = viewer ? canRemoveMember(viewer, member) : { ok: false as const };
+            // Leaving is the member's own row, so it reads differently from removing someone else.
+            const canLeave = isMe && !member.isOwner;
+            const canRemoveOther = verdict.ok && !isMe;
+
             return (
               <div key={member.id} className="stack member-row">
                 <div className="row row-between row-nowrap">
@@ -141,26 +164,24 @@ export default function MembersPage() {
                         @{member.username}
                       </span>
                     )}
-                    {group?.myMemberId === member.id && (
-                      <span className="badge">Bạn</span>
+                    {member.isOwner && (
+                      <span className="badge badge-owner" title="Người tạo nhóm">
+                        Chủ nhóm
+                      </span>
                     )}
+                    {isMe && <span className="badge">Bạn</span>}
                   </span>
                   <span className="row row-nowrap">
-                    <IconButton
-                      icon="bank"
-                      label={member.bank ? "Sửa tài khoản" : "Thêm tài khoản"}
-                      title={
-                        member.bank
-                          ? `Sửa tài khoản nhận tiền của ${member.name}`
-                          : `Thêm tài khoản nhận tiền cho ${member.name}`
-                      }
-                      variant="ghost"
-                      onClick={() => {
-                        setEditingBank(editingBank === member.id ? null : member.id);
-                        setNotice(null);
-                      }}
-                    />
-                    {group?.myMemberId !== member.id && (
+                    {canLeave && (
+                      <IconButton
+                        icon="logout"
+                        label="Rời nhóm"
+                        title="Rời nhóm này"
+                        variant="danger"
+                        onClick={() => void handleRemove(member)}
+                      />
+                    )}
+                    {canRemoveOther && (
                       <IconButton
                         icon="trash"
                         label="Xóa"
@@ -181,25 +202,17 @@ export default function MembersPage() {
                       <span className="truncate">{member.bank.accountName}</span>
                     </>
                   ) : (
-                    <span>Chưa có tài khoản nhận tiền</span>
+                    <span>{bankHint(member)}</span>
                   )}
                 </span>
 
-                {editingBank === member.id && (
-                  <div className="stack bank-edit">
-                    <strong className="row row-nowrap">
-                      <Icon name="bank" size={18} />
-                      <span>Tài khoản nhận tiền của {member.name}</span>
-                    </strong>
-                    <BankInfoForm
-                      groupId={groupId}
-                      memberId={member.id}
-                      initial={member.bank}
-                      submitLabel="Lưu tài khoản"
-                      onSaved={handleBankSaved}
-                      onCancel={() => setEditingBank(null)}
-                    />
-                  </div>
+                {/* Bank info belongs to the account holder's profile, so it is read-only here:
+                    only the member themself can change it, on their own profile page. */}
+                {isMe && (
+                  <Link className="btn btn-ghost self-start" href="/profile" prefetch={false}>
+                    <Icon name="pencil" />
+                    <span>Cập nhật ở Hồ sơ</span>
+                  </Link>
                 )}
               </div>
             );
@@ -249,6 +262,11 @@ export default function MembersPage() {
             <span>Thêm</span>
           </button>
         </div>
+        {mode === "name" && (
+          <p className="muted">
+            Bạn thêm bằng tên thì người đó chưa có tài khoản trong ứng dụng, nên chưa có mã QR.
+          </p>
+        )}
       </form>
 
       {removed.length > 0 && (
