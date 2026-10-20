@@ -138,6 +138,31 @@ a {
   font-weight: 700;
 }
 
+/* The tab row scrolls sideways when it cannot fit. A fade on the side that has more tabs is the
+   only hint a phone gives that the last one ("Nhật ký") is off screen, so it is not optional. */
+.tab-scroller {
+  position: relative;
+  --tab-fade: 24px;
+}
+
+.tab-scroller.fade-left {
+  mask-image: linear-gradient(to right, transparent 0, #000 var(--tab-fade));
+}
+
+.tab-scroller.fade-right {
+  mask-image: linear-gradient(to left, transparent 0, #000 var(--tab-fade));
+}
+
+.tab-scroller.fade-left.fade-right {
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--tab-fade),
+    #000 calc(100% - var(--tab-fade)),
+    transparent 100%
+  );
+}
+
 .tabs {
   list-style: none;
   display: flex;
@@ -145,12 +170,22 @@ a {
   margin: 0;
   padding: 0;
   overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 
-/* Tabs share the row evenly so all five labels stay visible on a phone. */
+/* A visible scrollbar inside a 40px tab row reads as a divider; the edge fade carries the hint. */
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Every tab keeps its label on one line and never squeezes below a comfortable tap target; the
+   row scrolls past the edge instead. */
 .tabs > li {
-  flex: 1 1 0;
-  min-width: 56px;
+  flex: 0 0 auto;
+  min-width: 64px;
+  scroll-snap-align: center;
 }
 
 .tab {
@@ -356,6 +391,13 @@ a {
   flex-wrap: nowrap;
 }
 
+/* A button never shrinks or wraps inside a no-wrap row: the field beside it gives way instead,
+   so a two-line label cannot make the row taller than its tap targets. */
+.row-nowrap > .btn {
+  flex: none;
+  white-space: nowrap;
+}
+
 .grow {
   flex: 1 1 auto;
   min-width: 0;
@@ -365,6 +407,9 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* A flex item will not shrink below its content width without this, so `.truncate` did
+     nothing inside a row and a long name pushed the row past the card instead. */
+  min-width: 0;
 }
 
 .meta {
@@ -373,6 +418,8 @@ a {
   gap: 6px;
   color: var(--muted);
   font-size: 0.85rem;
+  /* Long bank lines and long notes break between items rather than off the card edge. */
+  flex-wrap: wrap;
 }
 
 .amount {
@@ -394,7 +441,7 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   font: inherit;
   color: var(--text);
   background: var(--surface);
@@ -410,8 +457,9 @@ a {
 }
 
 .has-fab {
-  /* keeps the last card clear of the floating action button */
-  padding-bottom: 88px;
+  /* Keeps the last card's action row clear of the floating action button: the button is 52px tall
+     and sits 16px from the bottom, plus the phone's own safe area. */
+  padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
 }
 
 .fab {
@@ -424,11 +472,43 @@ a {
   text-decoration: none;
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   height: 52px;
   border-radius: 26px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
   z-index: 10;
+}
+
+/* An expense card's controls: icon-only, right-aligned, one 40px target each. */
+.card-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* One member's settlement position: the net line, then the smaller paid/owed line. */
+.balance-row {
+  gap: 2px;
+  padding-bottom: var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.balance-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/* A preset's unit price and its "/ đơn vị" unit: one unbreakable pair at the end of a row. */
+.preset-price {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex: none;
+}
+
+/* A log summary is a full sentence; it breaks inside long unbroken strings (names, amounts)
+   rather than running past the card. */
+.log-summary {
+  overflow-wrap: anywhere;
 }
 
 /* Tabs: icon above a short visible label, so the destination is never a guess. */
