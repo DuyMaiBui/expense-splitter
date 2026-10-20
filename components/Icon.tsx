@@ -118,6 +118,7 @@ const PATHS = {
     </>
   ),
   arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
+  arrowLeft: <path d="M19 12H5M11 6l-6 6 6 6" />,
   coins: (
     <>
       <circle cx="12" cy="12" r="9" />
@@ -180,6 +181,14 @@ const PATHS = {
     <>
       <path d="M3 9l9-5 9 5M5 9v9M9.5 9v9M14.5 9v9M19 9v9" />
       <path d="M3 20h18" />
+    </>
+  ),
+  chart: (
+    <>
+      <path d="M4 20h16" />
+      <rect x="5" y="12" width="3.5" height="6" rx="1" />
+      <rect x="10.25" y="7" width="3.5" height="11" rx="1" />
+      <rect x="15.5" y="14" width="3.5" height="4" rx="1" />
     </>
   ),
 } as const;

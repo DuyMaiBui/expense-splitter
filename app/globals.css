@@ -14,6 +14,22 @@
   --error-bg: #fdecea;
   --radius: 10px;
   --gap: 12px;
+
+  /* Categorical chart palette (donut slices). Fixed order, never cycled: a 7th member folds
+     into "Khác" instead of getting a generated hue. Every slot clears 3:1 against --surface
+     here, and the ORDER is the colourblind mechanism - adjacent slots were validated as a set
+     (worst adjacent CVD ΔE 7.8, normal-vision ΔE 16.6 on white). Do not reorder or swap a hue
+     without re-running the palette validator; bars use --primary alone (one series, one colour). */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #6250d6;
+  --chart-4: #178a63;
+  --chart-5: #a87500;
+  --chart-6: #d0648f;
+  --chart-7: #008300;
+  /* A bucket with no spending still draws a stub in this shade, so the baseline reads as a chart
+     and not as an empty box. */
+  --chart-empty: #cfcfd6;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -29,6 +45,18 @@
     --success: #5fd889;
     --success-bg: #15301f;
     --error-bg: #3a1e1e;
+
+    /* Same seven hue slots, stepped for the dark surface - selected, not an automatic flip.
+       All seven clear 3:1 against #1e1e24; the order is unchanged, so a member keeps the hue
+       they learned in either scheme. */
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #9085e9;
+    --chart-4: #199e70;
+    --chart-5: #c98500;
+    --chart-6: #d55181;
+    --chart-7: #008300;
+    --chart-empty: #3f3f49;
   }
 }
 
@@ -649,4 +677,185 @@ a {
   flex: none;
   white-space: nowrap;
   padding: 10px;
+}
+
+/* ------------------------------------------------------------- stats charts */
+
+/* Range control (Tổng | Năm | Tháng): three equal segments, full width, one 40px tap each. */
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.segmented > button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--radius) - 3px);
+  cursor: pointer;
+}
+
+.segmented > button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.segmented > button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* A chart never widens the page: the SVG scales on its viewBox, so it fits a 375px phone. */
+.chart-frame {
+  width: 100%;
+  overflow: hidden;
+}
+
+.chart-frame > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* A bar is a hit target wider than the mark itself: the transparent rect over the whole band
+   takes the tap, so a 2px column is still selectable with a thumb. */
+.chart-bar-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.chart-bar-hit:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+/* Axis and grid are hairlines one step off the surface: they never compete with the data. */
+.chart-axis-line {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.chart-tick-label {
+  fill: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The selected bar darkens by hue, not by opacity, so it stays distinguishable on dark surfaces. */
+.chart-bar {
+  transition: opacity 120ms ease-out;
+}
+
+.chart-bar-idle {
+  opacity: 0.45;
+}
+
+.chart-detail {
+  min-height: 1.5em;
+  font-size: 0.9rem;
+}
+
+.chart-detail strong {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A refetch dims the previous range's chart instead of blanking the card: the frame stays put and
+   only the numbers change, so the page does not jump while a new period loads. */
+.chart-busy {
+  opacity: 0.55;
+  transition: opacity 120ms ease-out;
+}
+
+/* The donut's centre total: compact, two lines at most, never overflowing the hole. */
+.chart-donut-total {
+  fill: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-donut-caption {
+  fill: var(--muted);
+  font-size: 9px;
+}
+
+/* A pie ring: a 2px surface gap between slices separates neighbours without a drawn border. */
+.chart-slice {
+  cursor: pointer;
+  transition: opacity 120ms ease-out;
+}
+
+.chart-slice:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chart-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 4px;
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.chart-legend-row[aria-pressed="true"] {
+  background: var(--bg);
+}
+
+.chart-legend-row:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.chart-swatch {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.chart-legend-value {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* Screen-reader-only: the table view of a chart, present in the DOM and never shown. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
