@@ -7,8 +7,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import { formatDateTime, formatVnd } from "@/lib/format";
+import { canModifyExpense } from "@/lib/permissions";
 import { summarizeSplit } from "@/lib/split-label";
-import type { Expense, Member } from "@/lib/types";
+import type { Expense, Member, Viewer } from "@/lib/types";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
@@ -17,6 +18,8 @@ interface ExpenseList {
   members: Member[];
   /** True when the server capped the list and older expenses exist. */
   hasMore: boolean;
+  /** The caller relative to this group: what the permission helpers below evaluate. */
+  viewer: Viewer;
 }
 
 export default function ExpensesPage() {
@@ -97,6 +100,14 @@ export default function ExpensesPage() {
             const split = summarizeSplit(expense.shares, nameOf, activeMemberIds);
             const payerName = nameOf(expense.paidByMemberId);
             const receiverName = expense.shares[0] ? nameOf(expense.shares[0].memberId) : "?";
+            // Edit and delete follow the SAME rule the route enforces: whoever created it, paid
+            // it, received it, owns the group, or is the admin. Anyone else sees the row only.
+            const canModify = data
+              ? canModifyExpense(data.viewer, expense, data.members)
+              : false;
+            // A recorded transfer is immutable in practice: the edit form would post a shared
+            // cost, and the contract keeps `kind` anyway, so only its deletion is offered.
+            const canEdit = canModify && !isPayment;
 
             return (
               <div key={expense.id} className="card stack">
@@ -146,25 +157,27 @@ export default function ExpensesPage() {
                 )}
 
                 {/* Icon-only, right-aligned, 40px targets; the accessible name carries the row. */}
-                <div className="row card-actions">
-                  {!isPayment && (
-                    <Link
-                      className="btn btn-icon btn-ghost"
-                      href={`/groups/${groupId}/expenses/${expense.id}/edit`}
-                      prefetch={false}
-                      aria-label={`Sửa ${expense.title}`}
-                      title={`Sửa ${expense.title}`}
-                    >
-                      <Icon name="pencil" />
-                    </Link>
-                  )}
-                  <IconButton
-                    icon="trash"
-                    label={isPayment ? "Xóa khoản thanh toán" : `Xóa ${expense.title}`}
-                    variant="danger"
-                    onClick={() => void handleDelete(expense)}
-                  />
-                </div>
+                {canModify && (
+                  <div className="row card-actions">
+                    {canEdit && (
+                      <Link
+                        className="btn btn-icon btn-ghost"
+                        href={`/groups/${groupId}/expenses/${expense.id}/edit`}
+                        prefetch={false}
+                        aria-label={`Sửa ${expense.title}`}
+                        title={`Sửa ${expense.title}`}
+                      >
+                        <Icon name="pencil" />
+                      </Link>
+                    )}
+                    <IconButton
+                      icon="trash"
+                      label={isPayment ? "Xóa khoản thanh toán" : `Xóa ${expense.title}`}
+                      variant="danger"
+                      onClick={() => void handleDelete(expense)}
+                    />
+                  </div>
+                )}
               </div>
             );
           })}
