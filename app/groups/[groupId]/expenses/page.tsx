@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import { formatDateTime, formatVnd } from "@/lib/format";
+import { summarizeSplit } from "@/lib/split-label";
 import type { Expense, Member } from "@/lib/types";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
@@ -63,6 +64,9 @@ export default function ExpensesPage() {
   // leave them out, so the two figures describe the same set.
   const spending = expenses?.filter((e) => e.kind !== "payment") ?? null;
   const total = spending?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
+  // Who would be "everyone" for an expense that splits across the whole group.
+  const activeMemberIds =
+    data?.members.filter((m) => m.removedAt === null).map((m) => m.id) ?? [];
 
   return (
     <main className="container stack has-fab">
@@ -85,50 +89,85 @@ export default function ExpensesPage() {
 
       {expenses && expenses.length > 0 && (
         <div className="stack">
-          {expenses.map((expense) => (
-            <div key={expense.id} className="card stack">
-              <div className="row row-between row-nowrap">
-                <span className="row row-nowrap grow">
-                  <strong className="truncate">{expense.title}</strong>
-                  {/* A settlement transfer is stored as an ordinary paid/share row; the badge
-                      keeps it from reading as a shared cost. */}
-                  {expense.kind === "payment" && <span className="badge">Thanh toán</span>}
-                </span>
-                <strong className="amount">{formatVnd(expense.amount)}</strong>
-              </div>
-              <div className="meta">
-                <Icon name="clock" size={16} />
-                {formatDateTime(expense.spentAt)}
-              </div>
-              <div className="meta">
-                <Icon name="wallet" size={16} />
-                {nameOf(expense.paidByMemberId)} trả
-              </div>
-              <div className="meta">
-                <Icon name="users" size={16} />
-                Chia cho: {expense.shares.map((s) => `${nameOf(s.memberId)} ${formatVnd(s.amount)}`).join(" · ")}
-              </div>
-              {expense.note && (
-                <div className="meta">
-                  <Icon name="note" size={16} />
-                  {expense.note}
+          {expenses.map((expense) => {
+            // A settlement transfer is stored as an ordinary paid/share row; the badge keeps it
+            // from reading as a shared cost, and its title is read as `payer → receiver` so the
+            // "Thanh toán:" prefix is not printed twice.
+            const isPayment = expense.kind === "payment";
+            const split = summarizeSplit(expense.shares, nameOf, activeMemberIds);
+            const payerName = nameOf(expense.paidByMemberId);
+            const receiverName = expense.shares[0] ? nameOf(expense.shares[0].memberId) : "?";
+
+            return (
+              <div key={expense.id} className="card stack">
+                <div className="row row-between row-nowrap">
+                  <span className="row row-nowrap grow">
+                    <strong className="truncate">
+                      {isPayment ? `${payerName} → ${receiverName}` : expense.title}
+                    </strong>
+                    {isPayment && <span className="badge">Thanh toán</span>}
+                  </span>
+                  <strong className="amount">{formatVnd(expense.amount)}</strong>
                 </div>
-              )}
-              <div className="row">
-                <Link className="btn" href={`/groups/${groupId}/expenses/${expense.id}/edit`} prefetch={false}>
-                  <Icon name="pencil" />
-                  <span>Sửa</span>
-                </Link>
-                <IconButton
-                  icon="trash"
-                  label="Xóa"
-                  variant="danger"
-                  showLabel
-                  onClick={() => void handleDelete(expense)}
-                />
+
+                {/* Payer and time share one line: three stacked meta lines cost a phone a card
+                    that no longer fits on screen. For a transfer the payer is already in the
+                    title, so only the time is left to say. */}
+                <div className="meta">
+                  <Icon name={isPayment ? "clock" : "wallet"} size={16} />
+                  <span className="grow">
+                    {isPayment
+                      ? formatDateTime(expense.spentAt)
+                      : `${payerName} trả · ${formatDateTime(expense.spentAt)}`}
+                  </span>
+                </div>
+
+                {/* A payment has exactly one receiver, already named by the title. */}
+                {!isPayment && (
+                  <div className="meta">
+                    <Icon name="users" size={16} />
+                    <span className="grow">
+                      {split.equal
+                        ? split.everyone
+                          ? "Chia đều cả nhóm"
+                          : `Chia cho: ${split.names.join(", ")}`
+                        : `Chia cho: ${split.entries
+                            .map((entry) => `${entry.name} ${formatVnd(entry.amount)}`)
+                            .join(" · ")}`}
+                    </span>
+                  </div>
+                )}
+
+                {expense.note && (
+                  <div className="meta">
+                    <Icon name="note" size={16} />
+                    <span className="grow">{expense.note}</span>
+                  </div>
+                )}
+
+                {/* Icon-only, right-aligned, 40px targets; the accessible name carries the row. */}
+                <div className="row card-actions">
+                  {!isPayment && (
+                    <Link
+                      className="btn btn-icon btn-ghost"
+                      href={`/groups/${groupId}/expenses/${expense.id}/edit`}
+                      prefetch={false}
+                      aria-label={`Sửa ${expense.title}`}
+                      title={`Sửa ${expense.title}`}
+                    >
+                      <Icon name="pencil" />
+                    </Link>
+                  )}
+                  <IconButton
+                    icon="trash"
+                    label={isPayment ? "Xóa khoản thanh toán" : `Xóa ${expense.title}`}
+                    variant="danger"
+                    onClick={() => void handleDelete(expense)}
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
