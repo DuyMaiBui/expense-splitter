@@ -77,8 +77,10 @@ export default function GroupsPage() {
               className="card row row-between row-nowrap"
               style={{ color: "inherit", textDecoration: "none" }}
             >
-              <strong className="truncate">{group.name}</strong>
-              <span className="meta">
+              <span className="row row-nowrap grow">
+                <strong className="truncate">{group.name}</strong>
+              </span>
+              <span className="meta" title={`${group.memberCount} thành viên`}>
                 <Icon name="users" size={16} />
                 {group.memberCount}
               </span>

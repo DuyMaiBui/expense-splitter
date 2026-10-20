@@ -166,7 +166,9 @@ export default function PresetsPage() {
         <div className="card stack">
           {presets.map((preset) =>
             editingId === preset.id ? (
-              <div key={preset.id} className="row row-nowrap">
+              <div key={preset.id} className="stack">
+                {/* Two fields on one row pushed both labels into wrapping; stacked they read as
+                    "name, then price", and the two 40px controls sit beside the second one. */}
                 <div className="field">
                   <Icon name="tag" />
                   <input
@@ -175,20 +177,29 @@ export default function PresetsPage() {
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
                     aria-label="Tên mục mẫu"
+                    placeholder="Tên mục mẫu"
                   />
                 </div>
-                <div className="field">
-                  <Icon name="coins" />
-                  <input
-                    className="input"
-                    inputMode="numeric"
-                    value={editPrice}
-                    onChange={(e) => setEditPrice(e.target.value)}
-                    aria-label="Giá một đơn vị"
+                <div className="row row-nowrap">
+                  <div className="field">
+                    <Icon name="coins" />
+                    <input
+                      className="input"
+                      inputMode="numeric"
+                      value={editPrice}
+                      onChange={(e) => setEditPrice(e.target.value)}
+                      aria-label="Giá một đơn vị"
+                      placeholder="Giá / đơn vị"
+                    />
+                  </div>
+                  <IconButton
+                    icon="check"
+                    label="Lưu"
+                    variant="primary"
+                    onClick={() => void handleSave(preset)}
                   />
+                  <IconButton icon="x" label="Hủy" onClick={() => setEditingId(null)} />
                 </div>
-                <IconButton icon="check" label="Lưu" variant="primary" onClick={() => void handleSave(preset)} />
-                <IconButton icon="x" label="Hủy" onClick={() => setEditingId(null)} />
               </div>
             ) : (
               <div key={preset.id} className="row row-between row-nowrap">
@@ -196,14 +207,26 @@ export default function PresetsPage() {
                   <Icon name="tag" />
                   <strong className="truncate">{preset.name}</strong>
                 </span>
-                <strong className="amount">{formatVnd(preset.unitPrice)}</strong>
-                <IconButton icon="pencil" label="Sửa" variant="ghost" onClick={() => startEdit(preset)} />
-                <IconButton
-                  icon="trash"
-                  label="Xóa"
-                  variant="danger"
-                  onClick={() => void handleDelete(preset)}
-                />
+                <span className="preset-price">
+                  <strong className="amount">{formatVnd(preset.unitPrice)}</strong>
+                  <span className="meta">/ đơn vị</span>
+                </span>
+                <span className="row row-nowrap card-actions">
+                  <IconButton
+                    icon="pencil"
+                    label="Sửa"
+                    title={`Sửa ${preset.name}`}
+                    variant="ghost"
+                    onClick={() => startEdit(preset)}
+                  />
+                  <IconButton
+                    icon="trash"
+                    label="Xóa"
+                    title={`Xóa ${preset.name}`}
+                    variant="danger"
+                    onClick={() => void handleDelete(preset)}
+                  />
+                </span>
               </div>
             ),
           )}

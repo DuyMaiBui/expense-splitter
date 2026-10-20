@@ -108,7 +108,7 @@ export default function LogPage() {
         <div key={entry.id} className="card stack">
           <div className="row row-nowrap">
             <Icon name={ACTION_ICON[entry.action] ?? "info"} />
-            <span className="grow">{entry.summary}</span>
+            <span className="grow log-summary">{entry.summary}</span>
           </div>
           <div className="meta">
             <Icon name="clock" size={16} />
