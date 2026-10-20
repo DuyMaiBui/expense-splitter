@@ -3,9 +3,11 @@
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
+import { BankInfoForm } from "@/components/BankInfoForm";
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import type { Group, Member } from "@/lib/types";
+import { bankByBin } from "@/lib/vietqr";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
@@ -14,11 +16,15 @@ export default function MembersPage() {
   const [group, setGroup] = useState<Group | null>(null);
   const [members, setMembers] = useState<Member[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [mode, setMode] = useState<"name" | "username">("name");
   const [value, setValue] = useState("");
   const [adding, setAdding] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // The member whose bank account is open for editing, by id (one at a time).
+  const [editingBank, setEditingBank] = useState<string | null>(null);
 
   const load = useCallback(
     async (fresh = false) => {
@@ -43,6 +49,7 @@ export default function MembersPage() {
     event.preventDefault();
     setAdding(true);
     setError(null);
+    setNotice(null);
     try {
       await api<{ member: Member }>(`/api/groups/${groupId}/members`, {
         method: "POST",
@@ -62,12 +69,23 @@ export default function MembersPage() {
       return;
     }
     setError(null);
+    setNotice(null);
     try {
       await api(`/api/groups/${groupId}/members/${member.id}`, { method: "DELETE" });
       await load();
     } catch (e) {
       setError(message(e, "Không xóa được thành viên."));
     }
+  }
+
+  function handleBankSaved(member: Member): void {
+    // The PATCH returned the stored member, so the row updates without another request.
+    setMembers((current) =>
+      current ? current.map((m) => (m.id === member.id ? member : m)) : current,
+    );
+    setEditingBank(null);
+    setError(null);
+    setNotice(`Đã lưu tài khoản nhận tiền của ${member.name}.`);
   }
 
   async function copyCode(code: string): Promise<void> {
@@ -86,6 +104,7 @@ export default function MembersPage() {
   return (
     <main className="container stack">
       {error && <p className="error">{error}</p>}
+      {notice && <p className="success">{notice}</p>}
       {!members && !error && <div className="spinner" role="status" aria-label="Đang tải" />}
 
       {group && (
@@ -109,28 +128,80 @@ export default function MembersPage() {
 
       {members && (
         <div className="card stack">
-          {active.map((member) => (
-            <div key={member.id} className="row row-between row-nowrap">
-              <span className="row row-nowrap grow">
-                <Icon name="user" />
-                <strong className="truncate">{member.name}</strong>
-                {member.username && <span className="muted truncate">@{member.username}</span>}
-                {group?.myMemberId === member.id && (
-                  <span className="badge">Bạn</span>
+          {active.map((member) => {
+            const bankEntry = member.bank ? bankByBin(member.bank.bin) : undefined;
+            return (
+              <div key={member.id} className="stack member-row">
+                <div className="row row-between row-nowrap">
+                  <span className="row row-nowrap grow">
+                    <Icon name="user" />
+                    <strong className="truncate">{member.name}</strong>
+                    {member.username && <span className="muted truncate">@{member.username}</span>}
+                    {group?.myMemberId === member.id && (
+                      <span className="badge">Bạn</span>
+                    )}
+                  </span>
+                  <span className="row row-nowrap">
+                    <IconButton
+                      icon="bank"
+                      label={member.bank ? "Sửa tài khoản" : "Thêm tài khoản"}
+                      title={
+                        member.bank
+                          ? `Sửa tài khoản nhận tiền của ${member.name}`
+                          : `Thêm tài khoản nhận tiền cho ${member.name}`
+                      }
+                      variant="ghost"
+                      showLabel
+                      onClick={() => {
+                        setEditingBank(editingBank === member.id ? null : member.id);
+                        setNotice(null);
+                      }}
+                    />
+                    {group?.myMemberId !== member.id && (
+                      <IconButton
+                        icon="trash"
+                        label="Xóa"
+                        title={`Xóa ${member.name}`}
+                        variant="danger"
+                        showLabel
+                        onClick={() => void handleRemove(member)}
+                      />
+                    )}
+                  </span>
+                </div>
+
+                <span className="meta">
+                  <Icon name="bank" size={16} />
+                  {member.bank ? (
+                    <>
+                      <span>{bankEntry ? bankEntry.shortName : `BIN ${member.bank.bin}`}</span>
+                      <span className="account-no">{member.bank.accountNo}</span>
+                      <span className="truncate">{member.bank.accountName}</span>
+                    </>
+                  ) : (
+                    <span>Chưa có tài khoản nhận tiền</span>
+                  )}
+                </span>
+
+                {editingBank === member.id && (
+                  <div className="stack bank-edit">
+                    <strong className="row row-nowrap">
+                      <Icon name="bank" size={18} />
+                      <span>Tài khoản nhận tiền của {member.name}</span>
+                    </strong>
+                    <BankInfoForm
+                      groupId={groupId}
+                      memberId={member.id}
+                      initial={member.bank}
+                      submitLabel="Lưu tài khoản"
+                      onSaved={handleBankSaved}
+                      onCancel={() => setEditingBank(null)}
+                    />
+                  </div>
                 )}
-              </span>
-              {group?.myMemberId !== member.id && (
-                <IconButton
-                  icon="trash"
-                  label="Xóa"
-                  title={`Xóa ${member.name}`}
-                  variant="danger"
-                  showLabel
-                  onClick={() => void handleRemove(member)}
-                />
-              )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       )}
 

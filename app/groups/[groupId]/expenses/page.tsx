@@ -83,7 +83,12 @@ export default function ExpensesPage() {
           {expenses.map((expense) => (
             <div key={expense.id} className="card stack">
               <div className="row row-between row-nowrap">
-                <strong className="truncate">{expense.title}</strong>
+                <span className="row row-nowrap grow">
+                  <strong className="truncate">{expense.title}</strong>
+                  {/* A settlement transfer is stored as an ordinary paid/share row; the badge
+                      keeps it from reading as a shared cost. */}
+                  {expense.kind === "payment" && <span className="badge">Thanh toán</span>}
+                </span>
                 <strong className="amount">{formatVnd(expense.amount)}</strong>
               </div>
               <div className="meta">
