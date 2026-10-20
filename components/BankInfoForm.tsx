@@ -3,19 +3,9 @@
 import { useId, useState, type FormEvent } from "react";
 
 import { Icon, IconButton } from "@/components/Icon";
-import { api, type ApiRequestInit } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
 import type { BankInfo, Member } from "@/lib/types";
 import { VIETQR_BANKS } from "@/lib/vietqr";
-
-/**
- * The member's receiving account, in one form shared by the members tab (set / edit) and the
- * payment dialog (fill it in when the receiver has none, then the QR appears).
- *
- * lib/api-client.ts types `method` as GET|POST|PUT|DELETE and lib/ is read-only for this lane;
- * the client hands the verb straight to fetch, so only the union is behind. Reported upward:
- * delete this cast once "PATCH" joins ApiRequestInit["method"].
- */
-const PATCH = "PATCH" as unknown as ApiRequestInit["method"];
 
 const ACCOUNT_NO = /^[0-9]{6,19}$/;
 
@@ -75,7 +65,7 @@ export function BankInfoForm({
     try {
       const data = await api<{ member: Member }>(
         `/api/groups/${groupId}/members/${memberId}`,
-        { method: PATCH, body: { bank: { bin, accountNo, accountName: name } } },
+        { method: "PATCH", body: { bank: { bin, accountNo, accountName: name } } },
       );
       onSaved(data.member);
     } catch (e) {

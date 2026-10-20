@@ -24,7 +24,7 @@ export class ApiClientError extends Error {
 }
 
 export interface ApiRequestInit {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   /** GET only: skip the cache and refetch (still shares an identical in-flight request). */
   fresh?: boolean;
