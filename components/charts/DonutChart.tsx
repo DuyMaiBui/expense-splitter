@@ -157,6 +157,9 @@ function SliceArc({ slice, circumference, dimmed, label, index, onSelect }: Slic
   const dash = `${length} ${circumference - length}`;
   const offset = -(slice.start * circumference) - gap / 2;
 
+  // Pointer-only on purpose: the SVG carries role="img", so an arc inside it is presentational to
+  // a screen reader and a `role="button"` there would be a focus stop with no name. The legend
+  // below is the keyboard path, and it says the same thing in words.
   return (
     <circle
       className="chart-slice"
@@ -170,19 +173,11 @@ function SliceArc({ slice, circumference, dimmed, label, index, onSelect }: Slic
       strokeDashoffset={offset}
       opacity={dimmed ? 0.4 : 1}
       transform={`rotate(-90 ${SIZE / 2} ${SIZE / 2})`}
-      role="button"
-      tabIndex={0}
-      aria-label={label}
+      aria-hidden="true"
       onPointerEnter={onSelect}
-      onFocus={onSelect}
       onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect();
-        }
-      }}
       data-index={index}
+      data-label={label}
     />
   );
 }
