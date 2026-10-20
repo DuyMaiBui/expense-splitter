@@ -1,4 +1,4 @@
-import type { Group, Member } from "./types";
+import type { BankInfo, Group, Member } from "./types";
 
 /**
  * Group and member reads shared by the group, member, expense and settlement routes.
@@ -13,13 +13,31 @@ interface MemberRow {
   removed_at: string | null;
   created_at: string;
   username: string | null;
+  bank_bin: string | null;
+  bank_account_no: string | null;
+  bank_account_name: string | null;
 }
 
 const MEMBER_SELECT = `
   SELECT m.id AS id, m.group_id AS group_id, m.user_id AS user_id, m.name AS name,
-         m.removed_at AS removed_at, m.created_at AS created_at, u.username AS username
+         m.removed_at AS removed_at, m.created_at AS created_at, u.username AS username,
+         m.bank_bin AS bank_bin, m.bank_account_no AS bank_account_no,
+         m.bank_account_name AS bank_account_name
   FROM group_members m
   LEFT JOIN users u ON u.id = m.user_id`;
+
+/**
+ * The stored bank account, or null. A row is written all-or-nothing, but a row from before the
+ * feature (or a manual edit) can hold only some of the three columns: that is not a usable
+ * account, so it reads as null rather than as a half-filled one.
+ */
+export function toBankInfo(row: MemberRow): BankInfo | null {
+  const { bank_bin: bin, bank_account_no: accountNo, bank_account_name: accountName } = row;
+  if (!bin || !accountNo || !accountName) {
+    return null;
+  }
+  return { bin, accountNo, accountName };
+}
 
 export function toMember(row: MemberRow): Member {
   return {
@@ -30,6 +48,7 @@ export function toMember(row: MemberRow): Member {
     username: row.username,
     removedAt: row.removed_at,
     createdAt: row.created_at,
+    bank: toBankInfo(row),
   };
 }
 

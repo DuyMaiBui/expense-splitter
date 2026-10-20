@@ -1,5 +1,5 @@
 import { badRequest } from "./errors";
-import type { Expense, ExpenseShare, Member } from "./types";
+import type { Expense, ExpenseKind, ExpenseShare, Member } from "./types";
 import { int, isoDate, obj, str, strArray } from "./validate";
 
 /** A validated create/update body (docs/CONTRACT.md § ENDPOINTS). */
@@ -11,6 +11,8 @@ export interface ExpenseInput {
   /** Null means "now" on create and "keep the current value" is NOT implied on update. */
   spentAt: string | null;
   note: string | null;
+  /** `payment` must name exactly one participant, the member who received the money. */
+  kind: ExpenseKind;
 }
 
 export function parseExpenseInput(raw: unknown): ExpenseInput {
@@ -32,7 +34,37 @@ export function parseExpenseInput(raw: unknown): ExpenseInput {
     note = trimmed === "" ? null : trimmed;
   }
 
-  return { title, amount, paidByMemberId, participantMemberIds, spentAt, note };
+  const kind = parseKind(body.kind);
+  const input: ExpenseInput = { title, amount, paidByMemberId, participantMemberIds, spentAt, note, kind };
+  assertPaymentShape(input);
+  return input;
+}
+
+/** Absent means "expense"; anything but the two documented values is a 400. */
+function parseKind(raw: unknown): ExpenseKind {
+  if (raw === undefined || raw === null) {
+    return "expense";
+  }
+  if (raw === "expense" || raw === "payment") {
+    return raw;
+  }
+  throw badRequest('Trường "kind" chỉ được là "expense" hoặc "payment".');
+}
+
+/**
+ * A payment transfers money from the payer to ONE receiver: exactly one participant, and it
+ * must not be the payer. Expenses are unconstrained here beyond the shared validation.
+ */
+export function assertPaymentShape(input: Pick<ExpenseInput, "kind" | "paidByMemberId" | "participantMemberIds">): void {
+  if (input.kind !== "payment") {
+    return;
+  }
+  if (input.participantMemberIds.length !== 1) {
+    throw badRequest("Khoản thanh toán phải có đúng một người nhận.");
+  }
+  if (input.participantMemberIds[0] === input.paidByMemberId) {
+    throw badRequest("Người trả và người nhận của khoản thanh toán phải khác nhau.");
+  }
 }
 
 /**
@@ -77,6 +109,7 @@ interface ExpenseRow {
   paid_by_member_id: string;
   spent_at: string;
   note: string | null;
+  kind: string;
   created_by_user_id: string;
   created_at: string;
   updated_at: string;
@@ -91,7 +124,7 @@ interface ShareRow {
 const EXPENSE_COLUMNS = `
   e.id AS id, e.group_id AS group_id, e.title AS title, e.amount AS amount,
   e.paid_by_member_id AS paid_by_member_id, e.spent_at AS spent_at, e.note AS note,
-  e.created_by_user_id AS created_by_user_id, e.created_at AS created_at,
+  e.kind AS kind, e.created_by_user_id AS created_by_user_id, e.created_at AS created_at,
   e.updated_at AS updated_at`;
 
 // Same order the composite index idx_expenses_group_live serves, so no sort step is needed.
@@ -99,6 +132,28 @@ const EXPENSE_ORDER = "ORDER BY e.spent_at DESC, e.created_at DESC, e.id DESC";
 
 /** Newest expenses returned by the list endpoint; older ones stay in D1 and in settlement. */
 export const EXPENSE_LIST_LIMIT = 300;
+
+/** The stored column is constrained by a CHECK, so anything else means a broken row, not user input. */
+function toExpenseKind(raw: string): ExpenseKind {
+  return raw === "payment" ? "payment" : "expense";
+}
+
+export function toExpense(row: ExpenseRow, shares: ExpenseShare[]): Expense {
+  return {
+    id: row.id,
+    groupId: row.group_id,
+    title: row.title,
+    amount: row.amount,
+    paidByMemberId: row.paid_by_member_id,
+    spentAt: row.spent_at,
+    note: row.note,
+    shares,
+    kind: toExpenseKind(row.kind),
+    createdByUserId: row.created_by_user_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 function assemble(rows: ExpenseRow[], shareRows: ShareRow[]): Expense[] {
   const sharesByExpense = new Map<string, ExpenseShare[]>();
@@ -108,19 +163,7 @@ function assemble(rows: ExpenseRow[], shareRows: ShareRow[]): Expense[] {
     sharesByExpense.set(row.expense_id, list);
   }
 
-  return rows.map((row) => ({
-    id: row.id,
-    groupId: row.group_id,
-    title: row.title,
-    amount: row.amount,
-    paidByMemberId: row.paid_by_member_id,
-    spentAt: row.spent_at,
-    note: row.note,
-    shares: sharesByExpense.get(row.id) ?? [],
-    createdByUserId: row.created_by_user_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }));
+  return rows.map((row) => toExpense(row, sharesByExpense.get(row.id) ?? []));
 }
 
 /**

@@ -168,6 +168,20 @@ const PATHS = {
       <path d="M7 15l3 3 2-2 3 3 4-4" />
     </>
   ),
+  qr: (
+    <>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <path d="M6 6h1M17 6h1M6 17h1M14 14h3v3h-3zM20 14v1M14 20h1M18 20h3v-2" />
+    </>
+  ),
+  bank: (
+    <>
+      <path d="M3 9l9-5 9 5M5 9v9M9.5 9v9M14.5 9v9M19 9v9" />
+      <path d="M3 20h18" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof PATHS;

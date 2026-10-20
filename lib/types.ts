@@ -72,8 +72,19 @@ export interface Group {
 }
 
 /**
+ * The bank account a member receives transfers on, used to render a VietQR payment code.
+ * `bin` is a 6-digit NAPAS BIN, `accountNo` 6..19 digits, `accountName` 1..50 characters.
+ */
+export interface BankInfo {
+  bin: string;
+  accountNo: string;
+  accountName: string;
+}
+
+/**
  * A group member. `userId`/`username` are null for a friend added without an account.
  * `removedAt` is set on a soft delete (removed members stay readable).
+ * `bank` is null until every one of the three stored bank columns is set.
  */
 export interface Member {
   id: string;
@@ -83,6 +94,7 @@ export interface Member {
   username: string | null;
   removedAt: string | null;
   createdAt: string;
+  bank: BankInfo | null;
 }
 
 /** One member's portion of an expense. */
@@ -90,6 +102,12 @@ export interface ExpenseShare {
   memberId: string;
   amount: number;
 }
+
+/**
+ * `expense` is a shared cost; `payment` is a settlement transfer recorded as an ordinary
+ * paid/share row (payer paid one other member), so it cancels that debt automatically.
+ */
+export type ExpenseKind = "expense" | "payment";
 
 /** An expense and the split of its amount across participants. */
 export interface Expense {
@@ -102,6 +120,8 @@ export interface Expense {
   spentAt: string;
   note: string | null;
   shares: ExpenseShare[];
+  /** Immutable once created: an edit never changes it (docs/CONTRACT.md § ENDPOINTS). */
+  kind: ExpenseKind;
   createdByUserId: string;
   createdAt: string;
   updatedAt: string;
@@ -154,6 +174,7 @@ export type LogAction =
   | "member.add"
   | "member.join"
   | "member.remove"
+  | "member.bank"
   | "expense.create"
   | "expense.update"
   | "expense.delete"

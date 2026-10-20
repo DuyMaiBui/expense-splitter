@@ -42,6 +42,7 @@ export const POST = route(async (req, ctx) => {
     spentAt: input.spentAt ?? now,
     note: input.note,
     shares,
+    kind: input.kind,
     createdByUserId: user.id,
     createdAt: now,
     updatedAt: now,
@@ -52,8 +53,8 @@ export const POST = route(async (req, ctx) => {
       .prepare(
         `INSERT INTO expenses
            (id, group_id, title, amount, paid_by_member_id, spent_at, note,
-            created_by_user_id, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+            created_by_user_id, created_at, updated_at, deleted_at, kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
       )
       .bind(
         expense.id,
@@ -66,6 +67,7 @@ export const POST = route(async (req, ctx) => {
         user.id,
         now,
         now,
+        expense.kind,
       ),
     ...shares.map((share) =>
       db

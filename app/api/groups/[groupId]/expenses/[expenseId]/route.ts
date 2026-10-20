@@ -2,7 +2,7 @@ import { logStatement } from "@/lib/activity";
 import { requireGroupMember, requireUser } from "@/lib/auth";
 import { getDb, nowIso } from "@/lib/db";
 import { notFound } from "@/lib/errors";
-import { assertMembersAllowed, loadExpense, parseExpenseInput } from "@/lib/expenses";
+import { assertMembersAllowed, assertPaymentShape, loadExpense, parseExpenseInput } from "@/lib/expenses";
 import { formatVnd } from "@/lib/format";
 import { listMembers } from "@/lib/group-queries";
 import { ok, readJson, route } from "@/lib/http";
@@ -34,6 +34,13 @@ export const PUT = route(async (req, ctx) => {
   const db = getDb();
   const before = await loadOne(db, groupId, expenseId);
   assertMembersAllowed(await listMembers(db, groupId), input, before);
+  // `kind` is immutable: an edit keeps the stored one, so a payment is still held to the
+  // one-receiver rule even when the body omits or contradicts `kind`.
+  assertPaymentShape({
+    kind: before.kind,
+    paidByMemberId: input.paidByMemberId,
+    participantMemberIds: input.participantMemberIds,
+  });
 
   const now = nowIso();
   const shares = splitEqual(input.amount, input.participantMemberIds);
