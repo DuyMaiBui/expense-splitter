@@ -490,11 +490,45 @@ a {
   width: 100%;
   max-width: 420px;
   max-height: calc(100vh - 32px);
-  overflow-y: auto;
+  max-height: calc(100dvh - 32px);
+  /* The middle scrolls (see .dialog-body): the header and the actions stay in view. */
+  overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
+}
+
+/* A tall dialog on a phone cannot fit at once. Only this middle band scrolls, so the primary
+   actions never end up below the fold; the negative margins put the scrollbar on the dialog's
+   edge instead of inside its padding. */
+.dialog-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 calc(-1 * 16px);
+  padding: 0 16px;
+}
+
+/* Outside the scrolling band: always visible, opaque, and separated from what scrolls. */
+.dialog-actions {
+  flex: none;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  background: var(--surface);
+}
+
+/* The title and the pair/amount header never scroll away either. */
+.dialog-head {
+  flex: none;
+}
+
+/* Several bands can share the footer slot (an error, a block reason, the confirm question):
+   one border, not three. */
+.dialog-actions + .dialog-actions {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .dialog h2 {
@@ -506,19 +540,33 @@ a {
   font-size: 1.5rem;
 }
 
-/* The QR is the point of the dialog: square, centred and big enough to scan at arm's length. */
+/* The QR is the point of the dialog: square, centred and big enough to scan at arm's length.
+   Its size is capped by the viewport height too, so the account details also fit on a short
+   phone; the 200px floor keeps it scannable and lets the dialog scroll instead. */
 .qr-image {
   display: block;
-  width: 100%;
-  max-width: 300px;
+  width: clamp(200px, 42vh, 300px);
+  max-width: 100%;
   height: auto;
   margin: 0 auto;
   border-radius: var(--radius);
   background: #ffffff;
 }
 
+/* An account number is copied as one string: it must never wrap mid-number. */
+.account-no-line {
+  min-width: 0;
+}
+
 .account-no {
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
-  word-break: break-all;
+}
+
+/* The copy control keeps its short label on one line, so it cannot squeeze the number. */
+.account-copy {
+  flex: none;
+  white-space: nowrap;
+  padding: 10px;
 }
