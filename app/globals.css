@@ -455,3 +455,70 @@ a {
 .group-nav-head .group-nav-title {
   margin: 0;
 }
+
+/* --------------------------------------------------- VietQR payment dialog */
+
+/* A settlement row is a two-line block: the pair + amount, then its actions. */
+.transfer-row {
+  gap: 8px;
+}
+
+/* A member row grows a bank line (and, when open, the bank form) under the name. */
+.member-row {
+  gap: 8px;
+}
+
+.bank-edit {
+  border-top: 1px solid var(--border);
+  padding-top: var(--gap);
+}
+
+/* A full-screen sheet on a phone, a centred card on a wider screen. */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.55);
+  overflow-y: auto;
+}
+
+.dialog {
+  width: 100%;
+  max-width: 420px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.dialog h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.dialog-amount {
+  font-size: 1.5rem;
+}
+
+/* The QR is the point of the dialog: square, centred and big enough to scan at arm's length. */
+.qr-image {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  margin: 0 auto;
+  border-radius: var(--radius);
+  background: #ffffff;
+}
+
+.account-no {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+}
