@@ -888,6 +888,47 @@ describe("settlement", () => {
     expect(r.transfers).toEqual([{ fromMemberId: bobM, toMemberId: aliceM, amount: 1500 }]);
   });
 
+  it("keeps totalSpent on spending only: a recorded payment cancels the transfer without adding to it", async () => {
+    const { alice, bob, gid, aliceM, bobM } = await setup();
+    await h.createExpense(alice, gid, {
+      title: "Ăn tối", amount: 240000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+    });
+
+    const before = (await h.settlement(alice, gid)).json.data;
+    expect(before.totalSpent).toBe(240000);
+    expect(before.transfers).toEqual([{ fromMemberId: bobM, toMemberId: aliceM, amount: 120000 }]);
+
+    // Bob settles what he owes: the payer is Bob, the single receiver is Alice.
+    const paid = await h.createExpense(bob, gid, {
+      title: "Thanh toán", amount: 120000, paidByMemberId: bobM, participantMemberIds: [aliceM], kind: "payment",
+    });
+    expect(paid.status).toBe(201);
+    expect(paid.json.data.expense.kind).toBe("payment");
+
+    const after = (await h.settlement(alice, gid)).json.data;
+    // The debt is cancelled: no transfer left...
+    expect(after.transfers).toEqual([]);
+    expect(after.balances.every((b: Json) => b.net === 0)).toBe(true);
+    // ...and the payment itself is not spending.
+    expect(after.totalSpent).toBe(240000);
+  });
+
+  it("a group with only payments has spent nothing while its balances still add up", async () => {
+    const { alice, bob, gid, aliceM, bobM } = await setup();
+    await h.createExpense(bob, gid, {
+      title: "Thanh toán", amount: 50000, paidByMemberId: bobM, participantMemberIds: [aliceM], kind: "payment",
+    });
+
+    const r = (await h.settlement(alice, gid)).json.data;
+    expect(r.totalSpent).toBe(0);
+
+    const net = Object.fromEntries(r.balances.map((b: Json) => [b.name, b.net]));
+    // Bob paid 50000 to Alice: Alice is 50000 down, Bob 50000 up, Chi untouched, summing to zero.
+    expect(net).toEqual({ Alice: -50000, Bob: 50000, Chi: 0 });
+    expect(Object.values(net).reduce((a, b) => a + (b as number), 0)).toBe(0);
+    expect(r.transfers).toEqual([{ fromMemberId: aliceM, toMemberId: bobM, amount: 50000 }]);
+  });
+
   it("is only visible to group members", async () => {
     const { gid } = await setup();
     const eve = new Client();
