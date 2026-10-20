@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 
+import { BankLogo } from "@/components/BankPicker";
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import { formatVnd } from "@/lib/format";
@@ -23,11 +24,6 @@ interface PaymentQrDialogProps {
   onClose: () => void;
   /** The payment was recorded: the caller reloads settlement, closes and reports it. */
   onPaid: (notice: string) => void;
-  /**
-   * Open straight at the confirm step ("Đã thanh toán" on the row). The QR stays above it when
-   * the receiver has an account; without one there is simply no code to show.
-   */
-  startAtConfirm?: boolean;
 }
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
@@ -56,9 +52,10 @@ function missingBankNotice(receiver: Member, viewer: Viewer): string {
 
 /**
  * One settlement transfer: show the receiver's VietQR code when their profile has one, then
- * record the payment after an explicit confirmation. A payment row is an ordinary payer/receiver
- * split, so settlement drops that debt itself — and it records a cash/other-channel payment just
- * as well, so a missing bank never blocks it.
+ * record the payment after an explicit confirmation. Recording is the dialog's LAST step, not a
+ * separate action on the row: scan, transfer, then confirm here. A payment row is an ordinary
+ * payer/receiver split, so settlement drops that debt itself; it records a cash/other-channel
+ * payment just as well, so a missing bank never blocks it.
  */
 export function PaymentQrDialog({
   groupId,
@@ -68,11 +65,10 @@ export function PaymentQrDialog({
   viewer,
   onClose,
   onPaid,
-  startAtConfirm = false,
 }: PaymentQrDialogProps) {
   const titleId = useId();
   const [copied, setCopied] = useState(false);
-  const [confirming, setConfirming] = useState(startAtConfirm);
+  const [confirming, setConfirming] = useState(false);
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -224,7 +220,7 @@ export function PaymentQrDialog({
 
               <div className="stack">
                 <span className="meta">
-                  <Icon name="bank" size={16} />
+                  <BankLogo entry={bankEntry ?? null} size={20} />
                   <span>{bankEntry ? bankEntry.shortName : `Ngân hàng (BIN ${bank.bin})`}</span>
                 </span>
                 <div className="row row-between row-nowrap">
@@ -287,6 +283,8 @@ export function PaymentQrDialog({
             </div>
           </div>
         ) : (
+          /* The primary action sits in the sticky footer under the QR: after the transfer, this
+             IS the next step, and it stays reachable without scrolling the code back. */
           <div className="row row-between dialog-actions">
             <IconButton icon="x" label="Đóng" showLabel onClick={onClose} />
             <button
@@ -296,7 +294,7 @@ export function PaymentQrDialog({
               title="Ghi nhận chuyển khoản hoặc trả tiền mặt"
             >
               <Icon name="check" />
-              <span>Đã thanh toán</span>
+              <span>Đã chuyển khoản xong</span>
             </button>
           </div>
         )}

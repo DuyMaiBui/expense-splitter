@@ -665,6 +665,14 @@ a {
   padding-top: 0;
 }
 
+/* The dialog's primary action is a full sentence ("Đã chuyển khoản xong"). At 375px it takes its
+   own line in the footer rather than squeezing the secondary action beside it. */
+.dialog-actions .btn-primary {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+}
+
 .dialog h2 {
   margin: 0;
   font-size: 1.1rem;
@@ -703,6 +711,157 @@ a {
   flex: none;
   white-space: nowrap;
   padding: 10px;
+}
+
+/* --------------------------------------------------- bank logo + picker */
+
+/* The logos are dark artwork on a transparent or white field, so each sits on its own white chip:
+   on the dark surface a bare PNG would otherwise float on #1e1e24 and lose most of its detail.
+   Fixed square, never larger than its row, so a 831x311 source cannot stretch the layout. */
+.bank-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: 2px;
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--muted);
+  overflow: hidden;
+}
+
+.bank-logo-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* The picker is an in-flow field (no portal): the panel pushes the form down instead of covering
+   the page, which is what keeps it usable inside the profile form at 375px. */
+.bank-field {
+  position: relative;
+}
+
+.bank-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+  /* Comfortably above the 44px touch target, even with the chip inside. */
+  min-height: 48px;
+}
+
+.bank-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.bank-trigger-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bank-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* 16px keeps iOS from zooming the page when the search box takes focus. */
+.bank-search {
+  font-size: 16px;
+  min-height: 44px;
+}
+
+.bank-list {
+  max-height: 296px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* The list scrolls on its own; the page behind it must not. */
+  -webkit-overflow-scrolling: touch;
+}
+
+.bank-section + .bank-section {
+  margin-top: 4px;
+}
+
+/* A sticky section header, so "Tất cả" stays named while its rows scroll past. */
+.bank-section-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: block;
+  padding: 6px 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--bg);
+}
+
+.bank-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  /* 48px: a row is a touch target first, a list item second. */
+  min-height: 48px;
+  padding: 6px 8px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* Two ways to be highlighted (pointer hover and the keyboard cursor) share one look, so a mouse
+   user and a keyboard user see the same row under the same rule. */
+.bank-option-active {
+  background: var(--surface);
+}
+
+.bank-option[aria-selected="true"] {
+  color: var(--primary);
+}
+
+.bank-option:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.bank-option-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.bank-option-name {
+  font-weight: 600;
+}
+
+.bank-option-full {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.bank-empty {
+  padding: 20px 12px;
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 /* ------------------------------------------------------------- stats charts */
