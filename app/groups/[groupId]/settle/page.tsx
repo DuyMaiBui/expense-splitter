@@ -143,35 +143,40 @@ export default function SettlePage() {
               <Icon name="scale" />
               <span>Chi tiết từng người</span>
             </h2>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Thành viên</th>
-                  <th>Đã trả</th>
-                  <th>Phải chịu</th>
-                  <th>Chênh lệch</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.balances.map((b) => (
-                  <tr key={b.memberId}>
-                    <td>
-                      {b.name}
-                      {b.removed && (
-                        <span className="badge">đã xóa</span>
-                      )}
-                    </td>
-                    <td>{formatVnd(b.paid)}</td>
-                    <td>{formatVnd(b.owed)}</td>
-                    <td className={b.net > 0 ? "amount amount-pos" : b.net < 0 ? "amount amount-neg" : "amount"}>
-                      {b.net > 0 ? "+" : ""}
-                      {formatVnd(b.net)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="muted">Số dương: được nhận lại. Số âm: còn phải trả.</p>
+            {/* The net position is the answer a member opens this page for, so it is the figure
+                they read first; paid/owed stay as a small line underneath. A 4-column table on a
+                phone wrapped every amount and pushed the meaningful column off screen. */}
+            {data.balances.length === 0 ? (
+              <p className="empty">Nhóm chưa có ai.</p>
+            ) : (
+              data.balances.map((b) => (
+                <div key={b.memberId} className="stack balance-row">
+                  <div className="row row-between row-nowrap">
+                    <span className="row row-nowrap grow">
+                      <strong className="truncate" title={b.name}>
+                        {b.name}
+                      </strong>
+                      {b.removed && <span className="badge">đã xóa</span>}
+                    </span>
+                    <strong
+                      className={
+                        b.net > 0 ? "amount amount-pos" : b.net < 0 ? "amount amount-neg" : "amount"
+                      }
+                    >
+                      {b.net > 0
+                        ? `+${formatVnd(b.net)} nhận lại`
+                        : b.net < 0
+                          ? `${formatVnd(b.net)} còn phải trả`
+                          : "đã huề"}
+                    </strong>
+                  </div>
+                  <span className="meta">
+                    <Icon name="wallet" size={16} />
+                    Đã trả {formatVnd(b.paid)} · Phải chịu {formatVnd(b.owed)}
+                  </span>
+                </div>
+              ))
+            )}
           </section>
         </>
       )}
