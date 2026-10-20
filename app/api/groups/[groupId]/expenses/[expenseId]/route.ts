@@ -1,13 +1,14 @@
 import { logStatement } from "@/lib/activity";
-import { requireGroupMember, requireUser } from "@/lib/auth";
+import { requireGroupMember, requireUser, type GroupMemberRef } from "@/lib/auth";
 import { getDb, nowIso } from "@/lib/db";
-import { notFound } from "@/lib/errors";
+import { forbidden, notFound } from "@/lib/errors";
 import { assertMembersAllowed, assertPaymentShape, loadExpense, parseExpenseInput } from "@/lib/expenses";
 import { formatVnd } from "@/lib/format";
-import { listMembers } from "@/lib/group-queries";
+import { buildViewer, listMembers } from "@/lib/group-queries";
 import { ok, readJson, route } from "@/lib/http";
+import { canModifyExpense } from "@/lib/permissions";
 import { splitEqual } from "@/lib/split";
-import type { Expense } from "@/lib/types";
+import type { Expense, Member, User } from "@/lib/types";
 
 async function loadOne(db: D1Database, groupId: string, expenseId: string): Promise<Expense> {
   const expense = await loadExpense(db, groupId, expenseId);
@@ -15,6 +16,20 @@ async function loadOne(db: D1Database, groupId: string, expenseId: string): Prom
     throw notFound("Không tìm thấy chi tiêu.");
   }
   return expense;
+}
+
+const DENIED_EXPENSE = "Bạn không có quyền sửa hoặc xóa chi tiêu này.";
+
+/**
+ * Refuses a caller who may not touch this expense.
+ *
+ * The verdict is computed from the STORED expense and the stored member rows, never from the
+ * request body: a body naming the caller as payer must not be able to authorise itself.
+ */
+function assertCanModify(user: User, actor: GroupMemberRef, expense: Expense, members: Member[]): void {
+  if (!canModifyExpense(buildViewer(user, actor), expense, members)) {
+    throw forbidden(DENIED_EXPENSE);
+  }
 }
 
 export const GET = route(async (_req, ctx) => {
@@ -29,11 +44,16 @@ export const PUT = route(async (req, ctx) => {
   const { groupId, expenseId } = await ctx.params;
   const user = await requireUser();
   const actor = await requireGroupMember(groupId, user);
-  const input = await readJson(req, parseExpenseInput);
 
   const db = getDb();
+  // The permission verdict comes first, against the STORED row, so a refused edit never reads
+  // or writes the body.
   const before = await loadOne(db, groupId, expenseId);
-  assertMembersAllowed(await listMembers(db, groupId), input, before);
+  const members = await listMembers(db, groupId);
+  assertCanModify(user, actor, before, members);
+
+  const input = await readJson(req, parseExpenseInput);
+  assertMembersAllowed(members, input, before);
   // `kind` is immutable: an edit keeps the stored one, so a payment is still held to the
   // one-receiver rule even when the body omits or contradicts `kind`.
   assertPaymentShape({
@@ -102,6 +122,7 @@ export const DELETE = route(async (_req, ctx) => {
 
   const db = getDb();
   const before = await loadOne(db, groupId, expenseId);
+  assertCanModify(user, actor, before, await listMembers(db, groupId));
   const now = nowIso();
 
   await db.batch([

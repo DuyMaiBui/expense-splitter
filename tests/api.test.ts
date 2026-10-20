@@ -45,6 +45,7 @@ import { GET as settlementGET } from "@/app/api/groups/[groupId]/settlement/rout
 import { GET as statsGET } from "@/app/api/groups/[groupId]/stats/route";
 import { POST as joinPOST } from "@/app/api/groups/join/route";
 import { GET as groupsGET, POST as groupsPOST } from "@/app/api/groups/route";
+import { PUT as profileBankPUT } from "@/app/api/profile/bank/route";
 
 /**
  * Route-handler integration tests. Each test gets a fresh in-memory SQLite database built
@@ -128,6 +129,8 @@ const h = {
   login: (c: Client, body: unknown) => call(c, loginPOST, { method: "POST", body }),
   logout: (c: Client) => call(c, logoutPOST, { method: "POST" }),
   me: (c: Client) => call(c, meGET),
+  setBank: (c: Client, body: unknown, path = "/api/profile/bank") =>
+    call(c, profileBankPUT, { method: "PUT", path, body }),
   createGroup: (c: Client, name: string) => call(c, groupsPOST, { method: "POST", body: { name } }),
   listGroups: (c: Client) => call(c, groupsGET),
   join: (c: Client, inviteCode: string) => call(c, joinPOST, { method: "POST", body: { inviteCode } }),
@@ -297,11 +300,9 @@ describe("auth", () => {
 
     // Registering never leaks a profile into another account: only the owner's row changes.
     const bank = { bin: "970436", accountNo: "0123456789", accountName: "NGUYEN VAN A" };
-    testDb.raw
-      .prepare(
-        "UPDATE users SET bank_bin = ?, bank_account_no = ?, bank_account_name = ? WHERE username = 'alice'",
-      )
-      .run(bank.bin, bank.accountNo, bank.accountName);
+    const saved = await h.setBank(c, { bank });
+    expect(saved.status).toBe(200);
+    expect(saved.json.data.user.bank).toEqual(bank);
 
     // The session cache is per isolate: a stale entry would hide a profile edit, so the login
     // below is the fresh read the browser does after signing in again.
@@ -429,14 +430,15 @@ describe("groups", () => {
 
 describe("members", () => {
   it("adds a friend by name (no account) and by username (linked account)", async () => {
-    const { alice, gid, chiM } = await setup();
+    const { bob, gid, chiM } = await setup();
     const eve = new Client();
     await h.register(eve, { username: "eve", displayName: "Eve", password: "secret3" });
 
-    const members = (await h.members(alice, gid)).json.data.members;
+    // Bob is a plain member: adding stays open to every active member.
+    const members = (await h.members(bob, gid)).json.data.members;
     expect(members.find((m: Json) => m.id === chiM)).toMatchObject({ userId: null, username: null });
 
-    const linked = await h.addMember(alice, gid, { username: "EVE" });
+    const linked = await h.addMember(bob, gid, { username: "EVE" });
     expect(linked.status).toBe(201);
     expect(linked.json.data.member).toMatchObject({ name: "Eve", username: "eve" });
     expect(linked.json.data.member.userId).toBeTruthy();
@@ -452,17 +454,17 @@ describe("members", () => {
   });
 
   it("rejects duplicate names case- and diacritic-insensitively among active members", async () => {
-    const { alice, gid } = await setup();
-    expect((await h.addMember(alice, gid, { name: "chi" })).status).toBe(409);
-    expect((await h.addMember(alice, gid, { name: "  CHI " })).status).toBe(409);
-    expect((await h.addMember(alice, gid, { name: "Đạt" })).status).toBe(201);
-    expect((await h.addMember(alice, gid, { name: "đạt" })).status).toBe(409);
+    const { bob, gid } = await setup();
+    expect((await h.addMember(bob, gid, { name: "chi" })).status).toBe(409);
+    expect((await h.addMember(bob, gid, { name: "  CHI " })).status).toBe(409);
+    expect((await h.addMember(bob, gid, { name: "Đạt" })).status).toBe(201);
+    expect((await h.addMember(bob, gid, { name: "đạt" })).status).toBe(409);
   });
 
   it("rejects an unknown username and an account that is already a member", async () => {
-    const { alice, gid } = await setup();
-    expect((await h.addMember(alice, gid, { username: "nobody" })).status).toBe(404);
-    expect((await h.addMember(alice, gid, { username: "bob" })).status).toBe(409);
+    const { bob, gid } = await setup();
+    expect((await h.addMember(bob, gid, { username: "nobody" })).status).toBe(404);
+    expect((await h.addMember(bob, gid, { username: "bob" })).status).toBe(409);
   });
 
   it("removal is soft: the member stays listed with removedAt and loses access", async () => {
@@ -479,6 +481,7 @@ describe("members", () => {
 
   it("cannot remove yourself or a member that is not there", async () => {
     const { alice, gid, aliceM, chiM } = await setup();
+    // The owner's own row is protected for everyone, so the owner can neither be removed nor leave.
     expect((await h.removeMember(alice, gid, aliceM)).status).toBe(409);
     expect((await h.removeMember(alice, gid, "no-such-member")).status).toBe(404);
 
@@ -500,6 +503,7 @@ describe("members", () => {
     const { alice, gid, bobM } = await setup();
     await h.removeMember(alice, gid, bobM);
 
+    // The owner re-adds the account that just left.
     const r = await h.addMember(alice, gid, { username: "bob" });
     expect(r.status).toBe(201);
     expect(r.json.data.member.id).toBe(bobM);
@@ -534,13 +538,8 @@ describe("members", () => {
     const { alice, gid, aliceM, chiM } = await setup();
     const BANK = { bin: "970436", accountNo: "0123456789", accountName: "NGUYEN VAN A" };
 
-    // There is no API to move a bank account onto a member row any more (the profile route is
-    // the API lane's); write the user's profile directly to prove the READ derives it.
-    testDb.raw
-      .prepare(
-        "UPDATE users SET bank_bin = ?, bank_account_no = ?, bank_account_name = ? WHERE username = 'alice'",
-      )
-      .run(BANK.bin, BANK.accountNo, BANK.accountName);
+    // The profile is written through its own route; the member row only DERIVES it.
+    expect((await h.setBank(alice, { bank: BANK })).status).toBe(200);
 
     const members = (await h.members(alice, gid)).json.data.members;
     expect(members.find((m: Json) => m.id === aliceM).bank).toEqual(BANK);
@@ -738,7 +737,7 @@ describe("expenses", () => {
     expect((await h.deleteExpense(eve, gid, e.id)).status).toBe(403);
   });
 
-  it("any active member can edit and delete (not just the creator)", async () => {
+  it("an unrelated member cannot edit or delete someone else's expense", async () => {
     const { alice, bob, gid, aliceM } = await setup();
     const e = (
       await h.createExpense(alice, gid, {
@@ -746,7 +745,11 @@ describe("expenses", () => {
       })
     ).json.data.expense;
 
-    expect((await h.deleteExpense(bob, gid, e.id)).status).toBe(200);
+    // Alice created it, paid it and is its only participant: Bob is none of the three.
+    const denied = await h.deleteExpense(bob, gid, e.id);
+    expect(denied.status).toBe(403);
+    expect(denied.json.error.code).toBe("FORBIDDEN");
+    expect((await h.getExpense(alice, gid, e.id)).json.data.expense.id).toBe(e.id);
   });
 });
 
@@ -2285,3 +2288,423 @@ describe("stats", () => {
     expect(feb.members).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------- profile bank
+
+const BANK = { bin: "970436", accountNo: "0123456789", accountName: "NGUYEN VAN A" };
+
+/** A signed-in plain account (no group needed). */
+async function account(username: string) {
+  const c = new Client();
+  const reg = await h.register(c, { username, displayName: username, password: "secret1" });
+  return { c, id: reg.json.data.user.id as string };
+}
+
+/** The three stored columns of one user row. */
+function storedBank(username: string) {
+  const row = testDb.raw
+    .prepare(
+      "SELECT bank_bin, bank_account_no, bank_account_name FROM users WHERE username = ?",
+    )
+    .get(username) as {
+    bank_bin: string | null;
+    bank_account_no: string | null;
+    bank_account_name: string | null;
+  };
+  return { bin: row.bank_bin, accountNo: row.bank_account_no, accountName: row.bank_account_name };
+}
+
+describe("profile bank", () => {
+  it("sets the caller's own profile and returns it with the user", async () => {
+    const { c } = await account("alice");
+
+    const r = await h.setBank(c, { bank: BANK });
+    expect(r.status).toBe(200);
+    expect(r.json.data.user).toMatchObject({ username: "alice", bank: BANK });
+    expect(storedBank("alice")).toEqual(BANK);
+
+    // The response is the caller's profile as stored, and a read straight after agrees: the
+    // route drops the isolate's cached session, so no stale empty profile is served.
+    expect((await h.me(c)).json.data.user.bank).toEqual(BANK);
+  });
+
+  it("clears the profile with null, all three columns together", async () => {
+    const { c } = await account("alice");
+    await h.setBank(c, { bank: BANK });
+
+    const cleared = await h.setBank(c, { bank: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.json.data.user.bank).toBeNull();
+    expect(storedBank("alice")).toEqual({ bin: null, accountNo: null, accountName: null });
+    expect((await h.me(c)).json.data.user.bank).toBeNull();
+  });
+
+  it("requires the bank key: an empty body is never a silent clear", async () => {
+    const { c } = await account("alice");
+    await h.setBank(c, { bank: BANK });
+
+    for (const body of [{}, { accountName: "X" }, { bank: undefined }]) {
+      const r = await h.setBank(c, body);
+      expect(r.status).toBe(400);
+      expect(r.json.error.code).toBe("VALIDATION");
+    }
+    // The stored profile survived every rejected request.
+    expect(storedBank("alice")).toEqual(BANK);
+  });
+
+  it.each([
+    ["a partial account", { bin: "970436" }],
+    ["a non-numeric BIN", { ...BANK, bin: "97043X" }],
+    ["a short account number", { ...BANK, accountNo: "12345" }],
+    ["an empty account name", { ...BANK, accountName: "   " }],
+    ["a non-object bank", "970436-0123456789"],
+  ])("rejects %s with 400 and stores nothing", async (_label, bank) => {
+    const { c } = await account("alice");
+
+    const r = await h.setBank(c, { bank });
+    expect(r.status).toBe(400);
+    expect(r.json.error.code).toBe("VALIDATION");
+    expect(storedBank("alice")).toEqual({ bin: null, accountNo: null, accountName: null });
+  });
+
+  it("requires a session", async () => {
+    const r = await h.setBank(new Client(), { bank: BANK });
+    expect(r.status).toBe(401);
+    expect(r.json.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("refuses the admin account", async () => {
+    testDb.raw.exec(await buildAdminSql({ username: "admin", password: "Adm1n-passw0rd-long" }));
+    const admin = new Client();
+    await h.login(admin, { username: "admin", password: "Adm1n-passw0rd-long" });
+
+    const r = await h.setBank(admin, { bank: BANK });
+    expect(r.status).toBe(403);
+    expect(r.json.error.code).toBe("FORBIDDEN");
+    expect(storedBank("admin")).toEqual({ bin: null, accountNo: null, accountName: null });
+  });
+
+  it("a member cannot write another member's bank, and there is no route that could", async () => {
+    const { alice, bob, gid, aliceM } = await setup();
+    const bobId = (await h.me(bob)).json.data.user.id as string;
+
+    // The removed group-scoped PATCH: the module exposes no handler for it, and the caller only
+    // ever sends its own cookies, so there is no member id to point at someone else.
+    const route = await import("@/app/api/groups/[groupId]/members/[memberId]/route");
+    expect("PATCH" in route).toBe(false);
+
+    await h.setBank(bob, { bank: BANK });
+    const members = (await h.members(alice, gid)).json.data.members;
+    // Bob's own row carries Bob's profile; Alice's row is untouched.
+    expect(members.find((m: Json) => m.id !== aliceM && m.userId === bobId).bank).toEqual(BANK);
+    expect(members.find((m: Json) => m.id === aliceM).bank).toBeNull();
+    expect(storedBank("alice")).toEqual({ bin: null, accountNo: null, accountName: null });
+  });
+});
+
+// ------------------------------------------------------- viewer & group permissions
+
+const ADMIN_PASSWORD = "Adm1n-passw0rd-long";
+
+/** A logged-in admin account (created out of band, as an operator would). */
+async function adminClient(): Promise<{ admin: Client; adminId: string }> {
+  testDb.raw.exec(await buildAdminSql({ username: "admin", password: ADMIN_PASSWORD }));
+  const admin = new Client();
+  await h.login(admin, { username: "admin", password: ADMIN_PASSWORD });
+  const adminId = (await h.me(admin)).json.data.user.id as string;
+  return { admin, adminId };
+}
+
+/**
+ * alice (owner) + bob, dave and erin (plain accounts) + chi (a friend without an account).
+ * Every assertion below is about the permission matrix, so the cast is deliberately wide.
+ */
+async function permWorld() {
+  const { alice, bob, gid, code, aliceM, bobM, chiM } = await setup();
+
+  const dave = new Client();
+  const erin = new Client();
+  const daveId = (await h.register(dave, { username: "dave", displayName: "Dave", password: "secret4" }))
+    .json.data.user.id as string;
+  const erinId = (await h.register(erin, { username: "erin", displayName: "Erin", password: "secret5" }))
+    .json.data.user.id as string;
+  const daveM = (await h.join(dave, code)).json.data.group.myMemberId as string;
+  const erinM = (await h.join(erin, code)).json.data.group.myMemberId as string;
+
+  const aliceId = (await h.me(alice)).json.data.user.id as string;
+  const bobId = (await h.me(bob)).json.data.user.id as string;
+
+  return { alice, bob, dave, erin, gid, aliceId, bobId, daveId, erinId, aliceM, bobM, daveM, erinM, chiM };
+}
+
+const EXPENSE_BODY = (paidByMemberId: string, participants: string[]) => ({
+  title: "Ăn trưa",
+  amount: 90000,
+  paidByMemberId,
+  participantMemberIds: participants,
+});
+
+describe("viewer", () => {
+  /** The four envelopes that carry `viewer`. */
+  async function envelopes(c: Client, gid: string) {
+    return [
+      (await h.getGroup(c, gid)).json.data,
+      (await h.members(c, gid)).json.data,
+      (await h.expenses(c, gid)).json.data,
+      (await h.settlement(c, gid)).json.data,
+    ];
+  }
+
+  it("describes the owner in all four envelopes", async () => {
+    const w = await permWorld();
+    for (const data of await envelopes(w.alice, w.gid)) {
+      expect(data.viewer).toEqual({
+        userId: w.aliceId,
+        memberId: w.aliceM,
+        isOwner: true,
+        isAdmin: false,
+      });
+    }
+  });
+
+  it("describes a plain member in all four envelopes", async () => {
+    const w = await permWorld();
+    for (const data of await envelopes(w.bob, w.gid)) {
+      expect(data.viewer).toEqual({
+        userId: w.bobId,
+        memberId: w.bobM,
+        isOwner: false,
+        isAdmin: false,
+      });
+    }
+  });
+
+  it("describes the admin as owner-level with no member row, in all four envelopes", async () => {
+    const w = await permWorld();
+    const { admin, adminId } = await adminClient();
+    for (const data of await envelopes(admin, w.gid)) {
+      expect(data.viewer).toEqual({ userId: adminId, memberId: null, isOwner: true, isAdmin: true });
+    }
+  });
+
+  it("is absent on a refusal, exactly like every other envelope field", async () => {
+    const w = await permWorld();
+    const outsider = await account("frank");
+    const r = await h.getGroup(outsider.c, w.gid);
+    expect(r.status).toBe(403);
+    expect(r.json.data).toBeUndefined();
+  });
+});
+
+describe("permissions: expenses", () => {
+  it("lets the payer, the receiver, the owner and the admin record a payment", async () => {
+    const w = await permWorld();
+    const payment = (payer: string, receiver: string) => ({
+      title: "Thanh toán",
+      amount: 50000,
+      paidByMemberId: payer,
+      participantMemberIds: [receiver],
+      kind: "payment",
+    });
+
+    // The payer records it, the receiver records it, the owner records a payment between two
+    // other people, and the admin does too.
+    expect((await h.createExpense(w.bob, w.gid, payment(w.bobM, w.daveM))).status).toBe(201);
+    expect((await h.createExpense(w.dave, w.gid, payment(w.bobM, w.daveM))).status).toBe(201);
+    expect((await h.createExpense(w.alice, w.gid, payment(w.bobM, w.daveM))).status).toBe(201);
+
+    const { admin } = await adminClient();
+    expect((await h.createExpense(admin, w.gid, payment(w.bobM, w.daveM))).status).toBe(201);
+  });
+
+  it("refuses a payment from a member who is neither party", async () => {
+    const w = await permWorld();
+    const before = count("SELECT COUNT(*) AS c FROM expenses");
+
+    const r = await h.createExpense(w.erin, w.gid, {
+      title: "Thanh toán",
+      amount: 50000,
+      paidByMemberId: w.bobM,
+      participantMemberIds: [w.daveM],
+      kind: "payment",
+    });
+    expect(r.status).toBe(403);
+    expect(r.json.error.code).toBe("FORBIDDEN");
+    expect(r.json.error.message).toContain("người trả");
+    expect(count("SELECT COUNT(*) AS c FROM expenses")).toBe(before);
+  });
+
+  it("still lets any active member record an ordinary expense", async () => {
+    const w = await permWorld();
+    const r = await h.createExpense(w.erin, w.gid, EXPENSE_BODY(w.bobM, [w.bobM, w.erinM]));
+    expect(r.status).toBe(201);
+    expect(r.json.data.expense.kind).toBe("expense");
+  });
+
+  it("lets the creator, the payer and the owner edit and delete", async () => {
+    const w = await permWorld();
+
+    // Bob creates it and pays it: creator and payer at once.
+    const own = (
+      await h.createExpense(w.bob, w.gid, EXPENSE_BODY(w.bobM, [w.bobM, w.daveM]))
+    ).json.data.expense;
+    expect((await h.updateExpense(w.bob, w.gid, own.id, EXPENSE_BODY(w.bobM, [w.bobM]))).status).toBe(200);
+    expect((await h.deleteExpense(w.bob, w.gid, own.id)).status).toBe(200);
+
+    // The owner may edit an expense they neither created nor paid.
+    const theres = (
+      await h.createExpense(w.bob, w.gid, EXPENSE_BODY(w.bobM, [w.bobM, w.daveM]))
+    ).json.data.expense;
+    expect((await h.updateExpense(w.alice, w.gid, theres.id, EXPENSE_BODY(w.aliceM, [w.daveM]))).status).toBe(200);
+    expect((await h.deleteExpense(w.alice, w.gid, theres.id)).status).toBe(200);
+
+    // Dave pays the next one and edits it, though Bob created it.
+    const paidByDave = (
+      await h.createExpense(w.bob, w.gid, EXPENSE_BODY(w.daveM, [w.bobM, w.daveM]))
+    ).json.data.expense;
+    expect(
+      (await h.updateExpense(w.dave, w.gid, paidByDave.id, EXPENSE_BODY(w.daveM, [w.daveM]))).status,
+    ).toBe(200);
+  });
+
+  it("refuses an unrelated member and leaves the expense untouched", async () => {
+    const w = await permWorld();
+    const e = (
+      await h.createExpense(w.bob, w.gid, EXPENSE_BODY(w.bobM, [w.bobM, w.daveM]))
+    ).json.data.expense;
+    const stored = (await h.getExpense(w.alice, w.gid, e.id)).json.data.expense;
+
+    // Erin is an active member who neither created it, paid it, nor receives a payment from it.
+    const edit = await h.updateExpense(w.erin, w.gid, e.id, {
+      title: "Bị sửa trộm",
+      amount: 1,
+      paidByMemberId: w.erinM,
+      participantMemberIds: [w.erinM],
+    });
+    expect(edit.status).toBe(403);
+    expect(edit.json.error.code).toBe("FORBIDDEN");
+
+    const remove = await h.deleteExpense(w.erin, w.gid, e.id);
+    expect(remove.status).toBe(403);
+
+    // Nothing changed: neither the row nor its shares.
+    expect((await h.getExpense(w.alice, w.gid, e.id)).json.data.expense).toEqual(stored);
+    expect(count("SELECT COUNT(*) AS c FROM expense_shares WHERE expense_id = ?", e.id)).toBe(
+      stored.shares.length,
+    );
+  });
+
+  it("lets the receiver edit and delete the payment they were paid", async () => {
+    const w = await permWorld();
+    const mk = async () =>
+      (
+        await h.createExpense(w.bob, w.gid, {
+          title: "Thanh toán",
+          amount: 50000,
+          paidByMemberId: w.bobM,
+          participantMemberIds: [w.daveM],
+          kind: "payment",
+        })
+      ).json.data.expense;
+
+    const first = await mk();
+    const edited = await h.updateExpense(w.dave, w.gid, first.id, {
+      title: "Thanh toán (đã sửa)",
+      amount: 60000,
+      paidByMemberId: w.bobM,
+      participantMemberIds: [w.daveM],
+    });
+    expect(edited.status).toBe(200);
+    // `kind` stays what was stored, whatever the body says.
+    expect(edited.json.data.expense.kind).toBe("payment");
+
+    const second = await mk();
+    expect((await h.deleteExpense(w.dave, w.gid, second.id)).status).toBe(200);
+  });
+
+  it("refuses to let a non-participant edit a payment", async () => {
+    const w = await permWorld();
+    const payment = (
+      await h.createExpense(w.bob, w.gid, {
+        title: "Thanh toán",
+        amount: 50000,
+        paidByMemberId: w.bobM,
+        participantMemberIds: [w.daveM],
+        kind: "payment",
+      })
+    ).json.data.expense;
+
+    expect((await h.deleteExpense(w.erin, w.gid, payment.id)).status).toBe(403);
+    expect((await h.getExpense(w.alice, w.gid, payment.id)).json.data.expense.id).toBe(payment.id);
+  });
+});
+
+describe("permissions: member removal", () => {
+  it("lets the owner remove a friend and another member", async () => {
+    const w = await permWorld();
+    expect((await h.removeMember(w.alice, w.gid, w.chiM)).status).toBe(200);
+    expect((await h.removeMember(w.alice, w.gid, w.daveM)).status).toBe(200);
+
+    const members = (await h.members(w.alice, w.gid)).json.data.members;
+    expect(members.find((m: Json) => m.id === w.chiM).removedAt).toBeTruthy();
+    expect(members.find((m: Json) => m.id === w.daveM).removedAt).toBeTruthy();
+  });
+
+  it("refuses a plain member removing another member", async () => {
+    const w = await permWorld();
+    const r = await h.removeMember(w.bob, w.gid, w.daveM);
+    expect(r.status).toBe(403);
+    expect(r.json.error.code).toBe("FORBIDDEN");
+
+    const members = (await h.members(w.alice, w.gid)).json.data.members;
+    expect(members.find((m: Json) => m.id === w.daveM).removedAt).toBeNull();
+  });
+
+  it("lets a plain member leave the group by removing their own row", async () => {
+    const w = await permWorld();
+    const r = await h.removeMember(w.bob, w.gid, w.bobM);
+    expect(r.status).toBe(200);
+
+    // Gone from the group's reads, and the log reads as leaving, not as being kicked out.
+    expect((await h.getGroup(w.bob, w.gid)).status).toBe(403);
+    const entry = (await h.log(w.alice, w.gid)).json.data.entries.find(
+      (x: Json) => x.action === "member.remove",
+    );
+    expect(entry.summary).toContain("đã rời nhóm");
+    expect(entry.summary).not.toContain('xóa thành viên');
+  });
+
+  it("protects the owner from everyone, the owner included", async () => {
+    const w = await permWorld();
+    const { admin } = await adminClient();
+
+    for (const c of [w.alice, w.bob, admin]) {
+      const r = await h.removeMember(c, w.gid, w.aliceM);
+      expect(r.status).toBe(409);
+      expect(r.json.error.code).toBe("CONFLICT");
+    }
+    const members = (await h.members(w.alice, w.gid)).json.data.members;
+    expect(members.find((m: Json) => m.id === w.aliceM).removedAt).toBeNull();
+  });
+
+  it("lets the admin remove a non-owner but never the owner", async () => {
+    const w = await permWorld();
+    const { admin } = await adminClient();
+
+    expect((await h.removeMember(admin, w.gid, w.erinM)).status).toBe(200);
+    expect((await h.removeMember(admin, w.gid, w.aliceM)).status).toBe(409);
+  });
+
+  it("answers 404 before any permission verdict for an unknown or already removed member", async () => {
+    const w = await permWorld();
+
+    // Bob may not remove Dave, but an id that does not exist is not a refusal at all.
+    expect((await h.removeMember(w.bob, w.gid, "no-such-member")).status).toBe(404);
+    await h.removeMember(w.alice, w.gid, w.daveM);
+    // Removed already: still 404, for a caller who could have removed them and for one who could not.
+    expect((await h.removeMember(w.alice, w.gid, w.daveM)).status).toBe(404);
+    expect((await h.removeMember(w.bob, w.gid, w.daveM)).status).toBe(404);
+  });
+});
+
+

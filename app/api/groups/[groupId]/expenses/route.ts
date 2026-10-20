@@ -1,17 +1,19 @@
 import { logStatement } from "@/lib/activity";
 import { requireGroupMember, requireUser } from "@/lib/auth";
 import { getDb, newId, nowIso } from "@/lib/db";
+import { forbidden } from "@/lib/errors";
 import { assertMembersAllowed, loadExpenseList, parseExpenseInput } from "@/lib/expenses";
 import { formatVnd } from "@/lib/format";
-import { listMembers } from "@/lib/group-queries";
+import { buildViewer, listMembers } from "@/lib/group-queries";
 import { ok, readJson, route } from "@/lib/http";
+import { canRecordPayment } from "@/lib/permissions";
 import { splitEqual } from "@/lib/split";
 import type { Expense } from "@/lib/types";
 
 export const GET = route(async (_req, ctx) => {
   const { groupId } = await ctx.params;
   const user = await requireUser();
-  await requireGroupMember(groupId, user);
+  const actor = await requireGroupMember(groupId, user);
 
   // Members ride along so the expenses page needs ONE request instead of two.
   const db = getDb();
@@ -19,7 +21,7 @@ export const GET = route(async (_req, ctx) => {
     loadExpenseList(db, groupId),
     listMembers(db, groupId),
   ]);
-  return ok({ expenses, members, hasMore });
+  return ok({ expenses, members, hasMore, viewer: buildViewer(user, actor) });
 });
 
 export const POST = route(async (req, ctx) => {
@@ -30,6 +32,18 @@ export const POST = route(async (req, ctx) => {
 
   const db = getDb();
   assertMembersAllowed(await listMembers(db, groupId), input, null);
+
+  // A payment moves money between two people, so it is not open to the whole group: only the
+  // payer, the single receiver, the owner or the admin may record it. An ordinary expense stays
+  // open to every active member.
+  if (input.kind === "payment") {
+    const viewer = buildViewer(user, actor);
+    if (!canRecordPayment(viewer, input.paidByMemberId, input.participantMemberIds[0]!)) {
+      throw forbidden(
+        "Chỉ người trả, người nhận hoặc chủ nhóm mới được ghi nhận khoản thanh toán này.",
+      );
+    }
+  }
 
   const now = nowIso();
   const shares = splitEqual(input.amount, input.participantMemberIds);
