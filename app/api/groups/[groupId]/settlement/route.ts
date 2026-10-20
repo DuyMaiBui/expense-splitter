@@ -68,7 +68,6 @@ export const GET = route(async (_req, ctx) => {
   const balances = toBalances(totals);
   const transfers = computeTransfers(balances);
   // SUM() over no rows is NULL; a group with no expense (or only payments) spent nothing.
-  // SUM() over no rows is NULL; a group with no expense (or only payments) spent nothing.
   const totalSpent = spentResult?.results?.[0]?.total ?? 0;
 
   return ok({ balances, transfers, totalSpent });
