@@ -1,14 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { BankLogo } from "@/components/BankPicker";
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import { formatVnd } from "@/lib/format";
-import { canRecordPayment } from "@/lib/permissions";
-import type { Expense, Member, Transfer, Viewer } from "@/lib/types";
+import type { Expense, Member, Transfer } from "@/lib/types";
 import { bankByBin, buildVietQrUrl, sanitizeTransferNote } from "@/lib/vietqr";
 
 interface PaymentQrDialogProps {
@@ -18,8 +16,6 @@ interface PaymentQrDialogProps {
   payer: Member;
   /** The member who receives it. */
   receiver: Member;
-  /** The caller relative to this group: decides whether the payment can be recorded. */
-  viewer: Viewer;
   /** Dismiss: the caller clears the selected transfer. */
   onClose: () => void;
   /** The payment was recorded: the caller reloads settlement, closes and reports it. */
@@ -40,10 +36,7 @@ function paymentTitle(payerName: string, receiverName: string): string {
  * Bank info belongs to a user's own profile, so a friend added by name has none and cannot get
  * one; a linked account has simply not filled it in yet. Only the receiver themself can fix it.
  */
-function missingBankNotice(receiver: Member, viewer: Viewer): string {
-  if (receiver.id === viewer.memberId) {
-    return "Bạn chưa cài tài khoản nhận tiền";
-  }
+function missingBankNotice(receiver: Member): string {
   if (receiver.userId === null) {
     return `${receiver.name} không có tài khoản trong ứng dụng nên chưa tạo được mã QR`;
   }
@@ -62,7 +55,6 @@ export function PaymentQrDialog({
   transfer,
   payer,
   receiver,
-  viewer,
   onClose,
   onPaid,
 }: PaymentQrDialogProps) {
@@ -93,10 +85,6 @@ export function PaymentQrDialog({
       return null;
     }
   })();
-
-  // The route refuses a recording by anyone but the two parties, the owner or the admin: say so
-  // up front instead of failing after the scan.
-  const mayRecord = canRecordPayment(viewer, payer.id, receiver.id);
 
   // A removed member cannot be part of a new expense, so the API would refuse the payment too.
   const blockReason =
@@ -193,14 +181,7 @@ export function PaymentQrDialog({
         <div className="stack dialog-body">
           {!bank ? (
             <div className="stack">
-              <p className="muted">{missingBankNotice(receiver, viewer)}</p>
-              {/* Only the receiver themself can add the account, and only on their profile. */}
-              {receiver.id === viewer.memberId && (
-                <Link className="btn btn-primary self-start" href="/profile" prefetch={false}>
-                  <Icon name="bank" />
-                  <span>Cài ở Hồ sơ</span>
-                </Link>
-              )}
+              <p className="muted">{missingBankNotice(receiver)}</p>
             </div>
           ) : (
             <div className="stack">
@@ -258,10 +239,6 @@ export function PaymentQrDialog({
 
         {blockReason ? (
           <p className="muted dialog-actions">{blockReason}</p>
-        ) : !mayRecord ? (
-          <p className="muted dialog-actions">
-            Chỉ người trả, người nhận hoặc chủ nhóm ghi nhận được.
-          </p>
         ) : confirming ? (
           <div className="stack dialog-actions">
             <p className="muted">
