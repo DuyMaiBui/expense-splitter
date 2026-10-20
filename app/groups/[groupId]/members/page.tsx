@@ -136,7 +136,11 @@ export default function MembersPage() {
                   <span className="row row-nowrap grow">
                     <Icon name="user" />
                     <strong className="truncate">{member.name}</strong>
-                    {member.username && <span className="muted truncate">@{member.username}</span>}
+                    {member.username && (
+                      <span className="muted truncate" title={`@${member.username}`}>
+                        @{member.username}
+                      </span>
+                    )}
                     {group?.myMemberId === member.id && (
                       <span className="badge">Bạn</span>
                     )}
@@ -151,7 +155,6 @@ export default function MembersPage() {
                           : `Thêm tài khoản nhận tiền cho ${member.name}`
                       }
                       variant="ghost"
-                      showLabel
                       onClick={() => {
                         setEditingBank(editingBank === member.id ? null : member.id);
                         setNotice(null);
@@ -163,7 +166,6 @@ export default function MembersPage() {
                         label="Xóa"
                         title={`Xóa ${member.name}`}
                         variant="danger"
-                        showLabel
                         onClick={() => void handleRemove(member)}
                       />
                     )}
@@ -251,10 +253,14 @@ export default function MembersPage() {
 
       {removed.length > 0 && (
         <div className="card stack">
+          <span className="meta">
+            <Icon name="userMinus" size={16} />
+            <span>Đã rời nhóm</span>
+          </span>
           {removed.map((member) => (
             <span key={member.id} className="meta">
               <Icon name="userMinus" size={16} />
-              {member.name}
+              <span className="truncate">{member.name}</span>
             </span>
           ))}
         </div>

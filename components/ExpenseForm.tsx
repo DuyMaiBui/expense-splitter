@@ -158,8 +158,6 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
     return splitEqual(amount, [...participants]);
   }, [amount, participants]);
 
-  const nameOf = (id: string) => members.find((m) => m.id === id)?.name ?? "?";
-
   function toggle(memberId: string): void {
     setParticipants((current) => {
       const next = new Set(current);
@@ -265,21 +263,24 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
           </div>
         )}
         {selectedPreset && (
-          <div className="row row-nowrap">
-            <label className="label" htmlFor="quantity">
-              Số lượng
-            </label>
-            <div className="field" style={{ maxWidth: 140 }}>
-              <Icon name="plus" />
-              <input
-                id="quantity"
-                className="input"
-                inputMode="numeric"
-                value={quantityText}
-                onChange={(e) => handleQuantityChange(e.target.value)}
-                aria-describedby="quantity-total"
-              />
+          <div className="stack">
+            <div className="row row-nowrap">
+              <label className="label" htmlFor="quantity">
+                Số lượng
+              </label>
+              <div className="field" style={{ maxWidth: 140 }}>
+                <Icon name="plus" />
+                <input
+                  id="quantity"
+                  className="input"
+                  inputMode="numeric"
+                  value={quantityText}
+                  onChange={(e) => handleQuantityChange(e.target.value)}
+                  aria-describedby="quantity-total"
+                />
+              </div>
             </div>
+            {/* On its own line: beside the field this wraps mid-figure on a phone. */}
             <span id="quantity-total" className="meta">
               {Number.isFinite(presetAmount(selectedPreset.unitPrice, quantity))
                 ? `${formatVnd(selectedPreset.unitPrice)} × ${quantity} = ${formatVnd(
@@ -340,7 +341,7 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
             <Icon name="users" size={18} />
             Chia cho ai? ({participants.size})
           </span>
-          <span className="row row-nowrap">
+          <div className="row row-nowrap">
             <IconButton
               icon="check"
               label="Tất cả"
@@ -357,7 +358,7 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
               showLabel
               onClick={() => setParticipants(new Set())}
             />
-          </span>
+          </div>
         </div>
         <div className="row" role="group" aria-label="Chia cho ai">
           {selectable.map((m) => (
@@ -377,7 +378,15 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
       {preview.length > 0 && (
         <div className="meta">
           <Icon name="scale" size={16} />
-          Mỗi người: {preview.map((s) => `${nameOf(s.memberId)} ${formatVnd(s.amount)}`).join(" · ")}
+          {/* Every participant pays the same figure up to 1đ (the split rule gives the first
+              `amount mod n` people base+1), so the per-person amounts are not repeated here. */}
+          <span>
+            {amount % preview.length === 0
+              ? `Chia đều ${preview.length} người · mỗi người ${formatVnd(amount / preview.length)}`
+              : `Chia đều ${preview.length} người · mỗi người ≈ ${formatVnd(
+                  Math.floor(amount / preview.length),
+                )} (dư ${formatVnd(amount % preview.length)})`}
+          </span>
         </div>
       )}
 
