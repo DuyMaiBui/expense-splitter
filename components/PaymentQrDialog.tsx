@@ -161,7 +161,7 @@ export function PaymentQrDialog({
         aria-labelledby={titleId}
         tabIndex={-1}
       >
-        <div className="row row-between row-nowrap">
+        <div className="row row-between row-nowrap dialog-head">
           <h2 id={titleId} className="row row-nowrap">
             <Icon name="qr" />
             <span>Chuyển khoản</span>
@@ -169,7 +169,7 @@ export function PaymentQrDialog({
           <IconButton icon="x" label="Đóng" variant="ghost" disabled={paying} onClick={onClose} />
         </div>
 
-        <div className="stack">
+        <div className="stack dialog-head">
           <span className="row row-nowrap">
             <strong className="truncate">{payer.name}</strong>
             <Icon name="arrowRight" size={18} />
@@ -178,72 +178,79 @@ export function PaymentQrDialog({
           <strong className="amount dialog-amount">{formatVnd(transfer.amount)}</strong>
         </div>
 
-        {error && <p className="error">{error}</p>}
-
-        {!bank ? (
-          <div className="stack">
-            <p className="muted">
-              {payee.name} chưa có tài khoản nhận tiền. Điền thông tin ngân hàng để tạo mã QR.
-            </p>
-            {payee.removedAt === null ? (
-              <BankInfoForm
-                groupId={groupId}
-                memberId={payee.id}
-                initial={null}
-                submitLabel="Lưu và tạo mã QR"
-                onSaved={handleBankSaved}
-              />
-            ) : (
-              <p className="empty">Không thể thêm tài khoản cho thành viên đã rời nhóm.</p>
-            )}
-          </div>
-        ) : (
-          <div className="stack">
-            {qrUrl && (
-              <img
-                className="qr-image"
-                src={qrUrl}
-                alt={`Mã VietQR nhận ${formatVnd(transfer.amount)} cho ${payee.name}`}
-                width={300}
-                height={300}
-              />
-            )}
-
+        {/* Only this band scrolls, so the actions below never sit below the fold on a phone. */}
+        <div className="stack dialog-body">
+          {!bank ? (
             <div className="stack">
-              <span className="meta">
-                <Icon name="bank" size={16} />
-                <span>{bankEntry ? bankEntry.shortName : `Ngân hàng (BIN ${bank.bin})`}</span>
-              </span>
-              <div className="row row-between row-nowrap">
-                <span className="meta">
-                  <Icon name="wallet" size={16} />
-                  <span className="account-no">{bank.accountNo}</span>
-                </span>
-                <IconButton
-                  icon={copied ? "check" : "copy"}
-                  label={copied ? "Đã chép" : "Sao chép số tài khoản"}
-                  variant="ghost"
-                  showLabel
-                  onClick={() => void copyAccountNo()}
+              <p className="muted">
+                {payee.name} chưa có tài khoản nhận tiền. Điền thông tin ngân hàng để tạo mã QR.
+              </p>
+              {payee.removedAt === null ? (
+                <BankInfoForm
+                  groupId={groupId}
+                  memberId={payee.id}
+                  initial={null}
+                  submitLabel="Lưu và tạo mã QR"
+                  onSaved={handleBankSaved}
                 />
-              </div>
-              <span className="meta">
-                <Icon name="user" size={16} />
-                <span>{bank.accountName}</span>
-              </span>
-              <span className="meta">
-                <Icon name="note" size={16} />
-                <span>Nội dung: {note}</span>
-              </span>
-              {bankEntry && <p className="muted">{bankEntry.name}</p>}
+              ) : (
+                <p className="empty">Không thể thêm tài khoản cho thành viên đã rời nhóm.</p>
+              )}
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="stack">
+              {qrUrl && (
+                <img
+                  className="qr-image"
+                  src={qrUrl}
+                  alt={`Mã VietQR nhận ${formatVnd(transfer.amount)} cho ${payee.name}`}
+                  width={300}
+                  height={300}
+                />
+              )}
+
+              <div className="stack">
+                <span className="meta">
+                  <Icon name="bank" size={16} />
+                  <span>{bankEntry ? bankEntry.shortName : `Ngân hàng (BIN ${bank.bin})`}</span>
+                </span>
+                <div className="row row-between row-nowrap">
+                  <span className="meta account-no-line">
+                    <Icon name="wallet" size={16} />
+                    <span className="account-no">{bank.accountNo}</span>
+                  </span>
+                  {/* Short visible label; the accessible name still says what is copied. */}
+                  <button
+                    type="button"
+                    className="btn btn-ghost account-copy"
+                    aria-label={copied ? "Đã sao chép số tài khoản" : "Sao chép số tài khoản"}
+                    title={copied ? "Đã sao chép số tài khoản" : "Sao chép số tài khoản"}
+                    onClick={() => void copyAccountNo()}
+                  >
+                    <Icon name={copied ? "check" : "copy"} />
+                    <span>{copied ? "Đã sao chép" : "Sao chép"}</span>
+                  </button>
+                </div>
+                <span className="meta">
+                  <Icon name="user" size={16} />
+                  <span>{bank.accountName}</span>
+                </span>
+                <span className="meta">
+                  <Icon name="note" size={16} />
+                  <span>Nội dung: {note}</span>
+                </span>
+                {bankEntry && <p className="muted">{bankEntry.name}</p>}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {error && <p className="error dialog-actions">{error}</p>}
 
         {blockReason ? (
-          <p className="muted">{blockReason}</p>
+          <p className="muted dialog-actions">{blockReason}</p>
         ) : confirming ? (
-          <div className="stack">
+          <div className="stack dialog-actions">
             <p className="muted">
               Xác nhận bạn đã chuyển {formatVnd(transfer.amount)} cho {payee.name}? Khoản này được ghi
               vào nhóm và trừ vào công nợ.
@@ -263,7 +270,7 @@ export function PaymentQrDialog({
             </div>
           </div>
         ) : (
-          <div className="row row-between">
+          <div className="row row-between dialog-actions">
             <IconButton icon="x" label="Đóng" showLabel onClick={onClose} />
             <button
               className="btn btn-primary"

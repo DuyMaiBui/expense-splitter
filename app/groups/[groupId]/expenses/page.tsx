@@ -57,7 +57,12 @@ export default function ExpensesPage() {
   }
 
   const expenses = data?.expenses ?? null;
-  const total = expenses?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
+  // A settlement transfer is stored as an ordinary paid/share row (kind "payment"), so counting it
+  // here would report money that moved between two members as money the group spent. The list
+  // below still shows those rows with their "Thanh toán" badge; only this total and its count
+  // leave them out, so the two figures describe the same set.
+  const spending = expenses?.filter((e) => e.kind !== "payment") ?? null;
+  const total = spending?.reduce((sum, e) => sum + e.amount, 0) ?? 0;
 
   return (
     <main className="container stack has-fab">
@@ -66,7 +71,7 @@ export default function ExpensesPage() {
           <Icon name="coins" />
           <span>Tổng</span>
           <strong className="amount">{formatVnd(total)}</strong>
-          {expenses && <span className="muted">· {expenses.length}{data?.hasMore ? "+" : ""}</span>}
+          {spending && <span className="muted">· {spending.length}{data?.hasMore ? "+" : ""}</span>}
         </span>
         <IconButton icon="refresh" label="Làm mới" variant="ghost" onClick={() => void load(true)} />
       </div>
