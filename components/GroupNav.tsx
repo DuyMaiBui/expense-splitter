@@ -56,6 +56,7 @@ export function GroupNav({ groupId }: GroupNavProps) {
     { label: "Chi tiêu", icon: "receipt", href: expensesBase },
     { label: "Thêm chi tiêu", short: "Thêm", icon: "plus", href: `${expensesBase}/new` },
     { label: "Tất toán", icon: "scale", href: `/groups/${groupId}/settle` },
+    { label: "Thống kê", icon: "chart", href: `/groups/${groupId}/stats` },
     { label: "Mục mẫu", short: "Mẫu", icon: "tag", href: `/groups/${groupId}/presets` },
     { label: "Thành viên", icon: "users", href: `/groups/${groupId}/members` },
     { label: "Nhật ký", icon: "clock", href: `/groups/${groupId}/log` },
