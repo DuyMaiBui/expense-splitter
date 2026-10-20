@@ -169,6 +169,50 @@ export interface Transfer {
   amount: number;
 }
 
+/** The range a spending chart covers: everything, one local year, or one local month. */
+export type StatsPeriod = "all" | "year" | "month";
+
+/**
+ * One column of a spending chart. `key` is the bucket identity the SQL groups by ("2026",
+ * "03", "31"); `label` is what an axis renders ("2026", "T3", "31").
+ */
+export interface StatsBucket {
+  key: string;
+  label: string;
+  /** Integer VND spent in this bucket. */
+  amount: number;
+  /** Number of expenses in this bucket. */
+  count: number;
+}
+
+/** A member's activity inside the charted range; only members with some activity appear. */
+export interface StatsMember {
+  memberId: string;
+  name: string;
+  removed: boolean;
+  /** Sum of this member's shares in the range. */
+  owed: number;
+  /** Sum of the expenses this member paid in the range. */
+  paid: number;
+}
+
+/**
+ * Everything one spending-chart request returns. `total`/`count` cover the whole range, which
+ * is the same as the sum over `buckets` for every period; only non-deleted `kind = "expense"`
+ * rows count (a settlement payment is never spending).
+ */
+export interface GroupStats {
+  period: StatsPeriod;
+  /** null when `period` is "all". */
+  year: number | null;
+  /** 1..12, only when `period` is "month". */
+  month: number | null;
+  total: number;
+  count: number;
+  buckets: StatsBucket[];
+  members: StatsMember[];
+}
+
 export type LogAction =
   | "group.create"
   | "member.add"
