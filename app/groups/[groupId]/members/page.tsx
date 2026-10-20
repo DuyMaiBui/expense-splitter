@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
+import { BankLogo } from "@/components/BankPicker";
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
 import { canRemoveMember } from "@/lib/permissions";
@@ -198,6 +199,7 @@ export default function MembersPage() {
                   <Icon name="bank" size={16} />
                   {member.bank ? (
                     <>
+                      <BankLogo entry={bankEntry ?? null} size={20} />
                       <span>{bankEntry ? bankEntry.shortName : `BIN ${member.bank.bin}`}</span>
                       <span className="account-no">{member.bank.accountNo}</span>
                       <span className="truncate">{member.bank.accountName}</span>

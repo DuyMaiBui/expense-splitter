@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
+import { BankLogo } from "@/components/BankPicker";
 import { Icon, IconButton } from "@/components/Icon";
 import { ProfileBankForm } from "@/components/ProfileBankForm";
 import { api } from "@/lib/api-client";
@@ -81,6 +82,7 @@ export default function ProfilePage() {
             {user.bank && (
               <span className="meta">
                 <Icon name="check" size={16} />
+                <BankLogo entry={bankEntry ?? null} size={24} />
                 <span>{bankEntry ? bankEntry.shortName : `BIN ${user.bank.bin}`}</span>
                 <span className="account-no">{user.bank.accountNo}</span>
                 <span className="truncate">{user.bank.accountName}</span>

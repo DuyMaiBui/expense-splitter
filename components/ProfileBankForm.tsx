@@ -2,10 +2,10 @@
 
 import { useId, useState, type FormEvent } from "react";
 
+import { BankPicker } from "@/components/BankPicker";
 import { Icon, IconButton } from "@/components/Icon";
 import { api, invalidateApiCache } from "@/lib/api-client";
 import type { BankInfo, User } from "@/lib/types";
-import { VIETQR_BANKS } from "@/lib/vietqr";
 
 const ACCOUNT_NO = /^[0-9]{6,19}$/;
 
@@ -28,13 +28,11 @@ export function ProfileBankForm({ initial, onSaved }: ProfileBankFormProps) {
   const [bin, setBin] = useState(initial?.bin ?? "");
   const [accountNo, setAccountNo] = useState(initial?.accountNo ?? "");
   const [accountName, setAccountName] = useState(initial?.accountName ?? "");
+  // A BIN outside VIETQR_BANKS (stored before this form existed) must stay selectable: the picker
+  // would otherwise show nothing and re-saving could switch banks silently.
   const [hasBank, setHasBank] = useState(initial !== null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // A BIN outside VIETQR_BANKS (stored before this form existed) must stay selectable: a plain
-  // select would snap it to "" and re-saving could switch banks silently.
-  const unknownBin = bin !== "" && !VIETQR_BANKS.some((bank) => bank.bin === bin);
 
   /**
    * The account is derived onto every member row the group pages cache, and the profile itself is
@@ -109,24 +107,7 @@ export function ProfileBankForm({ initial, onSaved }: ProfileBankFormProps) {
   return (
     <form className="stack" onSubmit={handleSubmit}>
       <div>
-        <label className="label" htmlFor={`${fieldId}-bank`}>
-          Ngân hàng
-        </label>
-        <select
-          id={`${fieldId}-bank`}
-          className="input"
-          value={bin}
-          onChange={(e) => setBin(e.target.value)}
-          required
-        >
-          <option value="">Chọn ngân hàng…</option>
-          {unknownBin && <option value={bin}>Ngân hàng hiện tại (BIN {bin})</option>}
-          {VIETQR_BANKS.map((bank) => (
-            <option key={bank.bin} value={bank.bin}>
-              {bank.shortName} · {bank.name}
-            </option>
-          ))}
-        </select>
+        <BankPicker label="Ngân hàng" value={bin} onChange={setBin} required />
       </div>
 
       <div>
