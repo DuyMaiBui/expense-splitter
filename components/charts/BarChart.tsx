@@ -45,7 +45,9 @@ export function BarChart({ buckets, title }: BarChartProps) {
     0,
   );
   const [selected, setSelected] = useState<number>(peakIndex);
-  const active = buckets[selected] ?? null;
+  // A shorter bucket set (a day range after a year range) can leave the stored index past the
+  // end, so the tallest column stands in rather than the detail line going blank.
+  const active = buckets[selected] ?? buckets[peakIndex] ?? null;
 
   const total = buckets.reduce((sum, bucket) => sum + bucket.amount, 0);
   const count = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
@@ -58,7 +60,6 @@ export function BarChart({ buckets, title }: BarChartProps) {
           viewBox={`0 0 ${VB_WIDTH} ${VB_HEIGHT}`}
           role="img"
           aria-label={summary}
-          preserveAspectRatio="none"
         >
           {/* Gridlines + y labels: solid hairlines, one step off the surface, never dashed. */}
           {ticks.map((tick, index) => {
@@ -80,7 +81,7 @@ export function BarChart({ buckets, title }: BarChartProps) {
             const height = barHeight(bucket.amount, topTick, PLOT_HEIGHT);
             const x = GUTTER + index * band + (band - barWidth) / 2;
             const y = BASELINE - height;
-            const isActive = index === selected;
+            const isActive = index === selected || (buckets[selected] === undefined && index === peakIndex);
             const rounded = Math.min(3, barWidth / 2, height / 2);
             return (
               <g
