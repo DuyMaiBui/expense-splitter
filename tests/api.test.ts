@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestDb, type TestDb } from "./helpers/d1";
 
@@ -42,6 +42,7 @@ import { PUT as adminGroupPUT } from "@/app/api/admin/groups/[groupId]/route";
 import { POST as adminGroupDeletePOST } from "@/app/api/admin/groups/[groupId]/delete/route";
 import { POST as adminGroupRestorePOST } from "@/app/api/admin/groups/[groupId]/restore/route";
 import { GET as settlementGET } from "@/app/api/groups/[groupId]/settlement/route";
+import { GET as statsGET } from "@/app/api/groups/[groupId]/stats/route";
 import { POST as joinPOST } from "@/app/api/groups/join/route";
 import { GET as groupsGET, POST as groupsPOST } from "@/app/api/groups/route";
 
@@ -150,6 +151,8 @@ const h = {
   log: (c: Client, groupId: string, query = "") =>
     call(c, logGET, { params: { groupId }, path: `/api/x${query}` }),
   settlement: (c: Client, groupId: string) => call(c, settlementGET, { params: { groupId } }),
+  stats: (c: Client, groupId: string, query = "") =>
+    call(c, statsGET, { params: { groupId }, path: `/api/x${query}` }),
   adminUsers: (c: Client) => call(c, adminUsersGET, { path: "/api/admin/users" }),
   resetPassword: (c: Client, userId: string, body: unknown = {}) =>
     call(c, adminResetPOST, { method: "POST", params: { userId }, body }),
@@ -313,6 +316,7 @@ describe("auth", () => {
       call(anon, expenseDELETE, { method: "DELETE", params: p }),
       call(anon, logGET, { params: p }),
       call(anon, settlementGET, { params: p }),
+      call(anon, statsGET, { params: p }),
     ]);
     expect(results.map((r) => r.status)).toEqual(Array(results.length).fill(401));
   });
@@ -2062,6 +2066,10 @@ describe("admin management", () => {
 
       // Settlement still computes for the edited data.
       expect((await h.settlement(w.alice, w.gid)).status).toBe(200);
+      // Stats reads a group the admin is not a member of, as the same built-in actor.
+      const stats = await h.stats(w.admin, w.gid);
+      expect(stats.status).toBe(200);
+      expect(stats.json.data.stats.total).toBe(0); // the only expense above was deleted
     });
 
     it("the admin cannot remove its own (virtual) member, and members cannot see an admin member", async () => {
@@ -2072,5 +2080,267 @@ describe("admin management", () => {
       expect(((await h.members(w.alice, w.gid)).json.data.members as Json[]).find((m) => m.id === w.bobM).removedAt)
         .toEqual(expect.any(String));
     });
+  });
+});
+
+// ---------------------------------------------------------------------------- stats
+
+describe("stats", () => {
+  /**
+   * Pins the clock before the request that depends on it. Only `Date` is faked: the whole
+   * facade (sessions, hashing) keeps using the real one.
+   */
+  function pinClock(isoNow: string): void {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(isoNow));
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("all: one bucket per local year with data, ascending, no zero fill", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    for (const [title, amount, spentAt] of [
+      ["2025", 7000, "2025-06-01T03:00:00.000Z"],
+      ["2026a", 5000, "2026-10-15T08:30:00.000Z"],
+      ["2026b", 15000, "2026-03-02T08:30:00.000Z"],
+    ] as const) {
+      const r = await h.createExpense(alice, gid, {
+        title, amount, spentAt, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+      });
+      expect(r.status).toBe(201);
+    }
+
+    const stats = (await h.stats(alice, gid)).json.data.stats;
+    expect(stats).toMatchObject({ period: "all", year: null, month: null, total: 27000, count: 3 });
+    expect(stats.buckets).toEqual([
+      { key: "2025", label: "2025", amount: 7000, count: 1 },
+      { key: "2026", label: "2026", amount: 20000, count: 2 },
+    ]);
+  });
+
+  it("year: always twelve zero-filled months, totalling the whole local year", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    for (const [amount, spentAt] of [
+      [5000, "2026-10-15T08:30:00.000Z"],
+      [15000, "2026-03-02T08:30:00.000Z"],
+      [99000, "2025-03-02T08:30:00.000Z"], // another year: outside the range
+    ] as const) {
+      await h.createExpense(alice, gid, {
+        title: "x", amount, spentAt, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+      });
+    }
+
+    const stats = (await h.stats(alice, gid, "?period=year&year=2026")).json.data.stats;
+    expect(stats).toMatchObject({ period: "year", year: 2026, month: null, total: 20000, count: 2 });
+    expect(stats.buckets).toHaveLength(12);
+    expect(stats.buckets.map((b: Json) => b.label)).toEqual(
+      ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "T11", "T12"],
+    );
+    expect(stats.buckets[2]).toEqual({ key: "03", label: "T3", amount: 15000, count: 1 });
+    expect(stats.buckets[9]).toEqual({ key: "10", label: "T10", amount: 5000, count: 1 });
+    expect(stats.buckets.filter((b: Json) => b.amount === 0)).toHaveLength(10);
+    expect(stats.buckets.reduce((sum: number, b: Json) => sum + b.amount, 0)).toBe(stats.total);
+  });
+
+  it("month: one zero-filled bucket per day of that local month", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    for (const [amount, spentAt] of [
+      [5000, "2026-10-15T08:30:00.000Z"],
+      [2000, "2026-10-15T20:00:00.000Z"], // 03:00 on 16 Oct, Vietnam time
+      [1000, "2026-11-02T08:30:00.000Z"], // another month
+    ] as const) {
+      await h.createExpense(alice, gid, {
+        title: "x", amount, spentAt, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+      });
+    }
+
+    const stats = (await h.stats(alice, gid, "?period=month&year=2026&month=10")).json.data.stats;
+    expect(stats).toMatchObject({ period: "month", year: 2026, month: 10, total: 7000, count: 2 });
+    expect(stats.buckets).toHaveLength(31);
+    expect(stats.buckets[0]).toEqual({ key: "01", label: "1", amount: 0, count: 0 });
+    expect(stats.buckets[14]).toEqual({ key: "15", label: "15", amount: 5000, count: 1 });
+    expect(stats.buckets[15]).toEqual({ key: "16", label: "16", amount: 2000, count: 1 });
+    expect(stats.buckets[30]).toEqual({ key: "31", label: "31", amount: 0, count: 0 });
+  });
+
+  it("buckets by Vietnam time: a UTC evening on 31 Dec lands on 1 Jan of the next year", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    await h.createExpense(alice, gid, {
+      title: "Giao thừa", amount: 8000, spentAt: "2026-12-31T17:30:00.000Z", // 00:30 on 1 Jan 2027 local
+      paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+    });
+
+    const all = (await h.stats(alice, gid)).json.data.stats;
+    expect(all.buckets).toEqual([{ key: "2027", label: "2027", amount: 8000, count: 1 }]);
+
+    // The row belongs to the 2027 local year, so 2026 is empty...
+    expect((await h.stats(alice, gid, "?period=year&year=2026")).json.data.stats.total).toBe(0);
+    // ...and 2027 January holds it on day 1.
+    const jan = (await h.stats(alice, gid, "?period=month&year=2027&month=1")).json.data.stats;
+    expect(jan.total).toBe(8000);
+    expect(jan.buckets[0]).toEqual({ key: "01", label: "1", amount: 8000, count: 1 });
+  });
+
+  it("never counts a settlement payment as spending, in buckets, total or members", async () => {
+    const { alice, bob, gid, aliceM, bobM } = await setup();
+    await h.createExpense(alice, gid, {
+      title: "Ăn tối", amount: 240000, spentAt: "2026-10-15T08:30:00.000Z",
+      paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+    });
+    // Bob settles half: a payment row, not a cost.
+    const payment = await h.createExpense(bob, gid, {
+      title: "Thanh toán", amount: 120000, spentAt: "2026-10-15T08:30:00.000Z",
+      paidByMemberId: bobM, participantMemberIds: [aliceM], kind: "payment",
+    });
+    expect(payment.status).toBe(201);
+    expect(payment.json.data.expense.kind).toBe("payment");
+
+    const stats = (await h.stats(alice, gid)).json.data.stats;
+    expect(stats).toMatchObject({ total: 240000, count: 1 });
+    expect(stats.buckets).toEqual([{ key: "2026", label: "2026", amount: 240000, count: 1 }]);
+    // Bob paid that row, but it is not spending: his `paid` stays at zero.
+    const byName = Object.fromEntries(stats.members.map((m: Json) => [m.name, m]));
+    expect(byName.Bob).toMatchObject({ paid: 0, owed: 120000 });
+    expect(byName.Alice).toMatchObject({ paid: 240000, owed: 120000 });
+
+    // A group holding ONLY a payment has spent nothing at all.
+    const onlyGroup = (await h.createGroup(alice, "Nhóm chỉ thanh toán")).json.data.group;
+    const joined = (await h.join(bob, onlyGroup.inviteCode)).json.data.group;
+    await h.createExpense(bob, onlyGroup.id, {
+      title: "Thanh toán", amount: 50000, paidByMemberId: joined.myMemberId,
+      participantMemberIds: [onlyGroup.myMemberId], kind: "payment",
+    });
+    expect((await h.stats(alice, onlyGroup.id)).json.data.stats).toMatchObject({
+      total: 0, count: 0, buckets: [], members: [],
+    });
+  });
+
+  it("ignores soft-deleted expenses everywhere", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    await h.createExpense(alice, gid, {
+      title: "Giữ", amount: 3000, spentAt: "2026-10-15T08:30:00.000Z",
+      paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+    });
+    const gone = (
+      await h.createExpense(alice, gid, {
+        title: "Xoá", amount: 900000, spentAt: "2026-10-16T08:30:00.000Z",
+        paidByMemberId: bobM, participantMemberIds: [aliceM, bobM],
+      })
+    ).json.data.expense;
+    expect((await h.deleteExpense(alice, gid, gone.id)).status).toBe(200);
+
+    const stats = (await h.stats(alice, gid)).json.data.stats;
+    expect(stats).toMatchObject({ total: 3000, count: 1 });
+    expect(stats.buckets).toEqual([{ key: "2026", label: "2026", amount: 3000, count: 1 }]);
+    // Bob's deleted expense was the only one he paid, so his `paid` is zero; his share of the
+    // kept one still counts, so he keeps a row.
+    expect(stats.members).toEqual([
+      { memberId: aliceM, name: "Alice", removed: false, owed: 1500, paid: 3000 },
+      { memberId: bobM, name: "Bob", removed: false, owed: 1500, paid: 0 },
+    ]);
+  });
+
+  it("sums owed from shares and paid from the payer, biggest owed first", async () => {
+    const { alice, gid, aliceM, bobM, chiM } = await setup();
+    // Alice pays 90000 split three ways: each owes 30000.
+    await h.createExpense(alice, gid, {
+      title: "Khách sạn", amount: 90000, spentAt: "2026-10-15T08:30:00.000Z",
+      paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM, chiM],
+    });
+    // Chi pays 30000 split two ways with Bob: 15000 each, so both end on 45000 owed.
+    await h.createExpense(alice, gid, {
+      title: "Cà phê", amount: 30000, spentAt: "2026-10-16T08:30:00.000Z",
+      paidByMemberId: chiM, participantMemberIds: [bobM, chiM],
+    });
+
+    const stats = (await h.stats(alice, gid)).json.data.stats;
+    expect(stats.members).toEqual([
+      // Tied on 45000 owed: the Vietnamese comparison puts Bob before Chi. Alice owes least.
+      { memberId: bobM, name: "Bob", removed: false, owed: 45000, paid: 0 },
+      { memberId: chiM, name: "Chi", removed: false, owed: 45000, paid: 30000 },
+      { memberId: aliceM, name: "Alice", removed: false, owed: 30000, paid: 90000 },
+    ]);
+  });
+
+  it("keeps a removed member who had activity, with removed: true", async () => {
+    const { alice, gid, aliceM, bobM, chiM } = await setup();
+    await h.createExpense(alice, gid, {
+      title: "A", amount: 3000, spentAt: "2026-10-15T08:30:00.000Z",
+      paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+    });
+    await h.removeMember(alice, gid, bobM); // owes 1500
+    await h.removeMember(alice, gid, chiM); // never involved
+
+    const stats = (await h.stats(alice, gid)).json.data.stats;
+    expect(stats.members.find((m: Json) => m.name === "Bob")).toMatchObject({ removed: true, owed: 1500 });
+    expect(stats.members.map((m: Json) => m.name)).not.toContain("Chi");
+  });
+
+  it("defaults to all, and to the current Vietnam year and month when they are omitted", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    await h.createExpense(alice, gid, {
+      title: "A", amount: 4000, spentAt: "2026-10-15T08:30:00.000Z",
+      paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+    });
+
+    pinClock("2026-10-20T03:00:00.000Z"); // 10:00 on 20 Oct in Vietnam
+
+    const def = (await h.stats(alice, gid)).json.data.stats;
+    expect(def).toMatchObject({ period: "all", year: null, month: null, total: 4000 });
+
+    const year = (await h.stats(alice, gid, "?period=year")).json.data.stats;
+    expect(year).toMatchObject({ period: "year", year: 2026, month: null, total: 4000 });
+    expect(year.buckets).toHaveLength(12);
+
+    const month = (await h.stats(alice, gid, "?period=month")).json.data.stats;
+    expect(month).toMatchObject({ period: "month", year: 2026, month: 10, total: 4000 });
+    expect(month.buckets).toHaveLength(31);
+  });
+
+  it.each([
+    ["an unknown period", "?period=week"],
+    ["a year that is not 4 digits", "?period=year&year=26"],
+    ["a year below the range", "?period=year&year=1969"],
+    ["a year above the range", "?period=year&year=2101"],
+    ["month zero", "?period=month&year=2026&month=0"],
+    ["month thirteen", "?period=month&year=2026&month=13"],
+    ["a non-numeric month", "?period=month&year=2026&month=ab"],
+    // A malformed pair is rejected even when the period does not use it.
+    ["a bad year under period=all", "?period=all&year=26"],
+  ])("rejects %s with 400 VALIDATION", async (_label, query) => {
+    const { alice, gid } = await setup();
+    const r = await h.stats(alice, gid, query);
+    expect(r.status).toBe(400);
+    expect(r.json.error.code).toBe("VALIDATION");
+    expect(r.json.error.message).toMatch(/[àáảãạăâđêôơư]/i);
+  });
+
+  it("is only visible to group members", async () => {
+    const { gid } = await setup();
+    const eve = new Client();
+    await h.register(eve, { username: "eve", displayName: "Eve", password: "secret3" });
+    expect((await h.stats(eve, gid)).status).toBe(403);
+    expect((await h.stats(eve, "no-such-group")).status).toBe(404);
+  });
+
+  it("a group with no expenses gives zeros and the full bucket axis", async () => {
+    const { alice, gid } = await setup();
+
+    expect((await h.stats(alice, gid)).json.data.stats).toEqual({
+      period: "all", year: null, month: null, total: 0, count: 0, buckets: [], members: [],
+    });
+
+    const year = (await h.stats(alice, gid, "?period=year&year=2026")).json.data.stats;
+    expect(year.total).toBe(0);
+    expect(year.count).toBe(0);
+    expect(year.buckets).toHaveLength(12);
+    expect(year.buckets.every((b: Json) => b.amount === 0 && b.count === 0)).toBe(true);
+
+    const feb = (await h.stats(alice, gid, "?period=month&year=2026&month=2")).json.data.stats;
+    expect(feb.total).toBe(0);
+    expect(feb.buckets).toHaveLength(28); // 2026 is not a leap year
+    expect(feb.members).toEqual([]);
   });
 });
