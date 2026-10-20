@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
@@ -7,12 +8,15 @@ import { Icon, IconButton } from "@/components/Icon";
 import { PaymentQrDialog } from "@/components/PaymentQrDialog";
 import { api } from "@/lib/api-client";
 import { formatVnd } from "@/lib/format";
-import type { Balance, Member, Transfer } from "@/lib/types";
+import { canRecordPayment } from "@/lib/permissions";
+import type { Balance, Member, Transfer, Viewer } from "@/lib/types";
 
 interface Settlement {
   balances: Balance[];
   transfers: Transfer[];
   totalSpent: number;
+  /** The caller relative to this group: what the permission helper below evaluates. */
+  viewer: Viewer;
 }
 
 export default function SettlePage() {
@@ -53,17 +57,15 @@ export default function SettlePage() {
   const payer = selected ? memberOf(selected.transfer.fromMemberId) : null;
   const receiver = selected ? memberOf(selected.transfer.toMemberId) : null;
 
+  /** Whether the caller may record this transfer (payer, receiver, owner or admin). */
+  const canRecord = (transfer: Transfer): boolean =>
+    data ? canRecordPayment(data.viewer, transfer.fromMemberId, transfer.toMemberId) : false;
+
   function handlePaid(report: string): void {
     setSelected(null);
     setNotice(report);
     setError(null);
     void load(true);
-  }
-
-  function handleBankSaved(member: Member): void {
-    setMembers((current) =>
-      current ? current.map((m) => (m.id === member.id ? member : m)) : current,
-    );
   }
 
   return (
@@ -91,48 +93,56 @@ export default function SettlePage() {
             {data.transfers.length === 0 ? (
               <p className="empty">Mọi người đã huề, không ai nợ ai.</p>
             ) : (
-              data.transfers.map((t) => (
-                <div key={`${t.fromMemberId}-${t.toMemberId}`} className="stack transfer-row">
-                  <div className="row row-between row-nowrap">
-                    <span className="row row-nowrap grow">
-                      <strong className="truncate">{nameOf(t.fromMemberId)}</strong>
-                      <Icon name="arrowRight" size={18} />
-                      <strong className="truncate">{nameOf(t.toMemberId)}</strong>
-                    </span>
-                    <strong className="amount">{formatVnd(t.amount)}</strong>
+              data.transfers.map((t) => {
+                const allowed = canRecord(t);
+                return (
+                  <div key={`${t.fromMemberId}-${t.toMemberId}`} className="stack transfer-row">
+                    <div className="row row-between row-nowrap">
+                      <span className="row row-nowrap grow">
+                        <strong className="truncate">{nameOf(t.fromMemberId)}</strong>
+                        <Icon name="arrowRight" size={18} />
+                        <strong className="truncate">{nameOf(t.toMemberId)}</strong>
+                      </span>
+                      <strong className="amount">{formatVnd(t.amount)}</strong>
+                    </div>
+                    <div className="row row-nowrap">
+                      <button
+                        className="btn"
+                        type="button"
+                        disabled={members === null}
+                        onClick={() => {
+                          setSelected({ transfer: t, atConfirm: false });
+                          setNotice(null);
+                        }}
+                      >
+                        <Icon name="qr" />
+                        <span>Tạo QR</span>
+                      </button>
+                      {allowed && (
+                        <button
+                          className="btn btn-primary"
+                          type="button"
+                          disabled={members === null}
+                          onClick={() => {
+                            setSelected({ transfer: t, atConfirm: true });
+                            setNotice(null);
+                          }}
+                        >
+                          <Icon name="check" />
+                          <span>Đã thanh toán</span>
+                        </button>
+                      )}
+                    </div>
+                    {!allowed && (
+                      <span className="muted">Chỉ người trả, người nhận hoặc chủ nhóm ghi nhận được.</span>
+                    )}
                   </div>
-                  <div className="row row-nowrap">
-                    <button
-                      className="btn"
-                      type="button"
-                      disabled={members === null}
-                      onClick={() => {
-                        setSelected({ transfer: t, atConfirm: false });
-                        setNotice(null);
-                      }}
-                    >
-                      <Icon name="qr" />
-                      <span>Tạo QR</span>
-                    </button>
-                    <button
-                      className="btn btn-primary"
-                      type="button"
-                      disabled={members === null}
-                      onClick={() => {
-                        setSelected({ transfer: t, atConfirm: true });
-                        setNotice(null);
-                      }}
-                    >
-                      <Icon name="check" />
-                      <span>Đã thanh toán</span>
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-            {data.transfers.length > 0 && (
+                );
+              })
+            )}            {data.transfers.length > 0 && (
               <p className="muted">
-                "Tạo QR" mở mã chuyển khoản. "Đã thanh toán" hỏi lại một lần rồi ghi khoản vào nhóm;
+                "Tạo QR" mở mã chuyển khoản (chỉ có khi người nhận đã cài tài khoản nhận tiền). "Đã
+                thanh toán" hỏi lại một lần rồi ghi khoản vào nhóm, kể cả khi trả bằng tiền mặt;
                 công nợ tự giảm theo.
               </p>
             )}
@@ -181,18 +191,26 @@ export default function SettlePage() {
         </>
       )}
 
-      {selected && payer && receiver && (
+      {selected && payer && receiver && data && (
         <PaymentQrDialog
           groupId={groupId}
           transfer={selected.transfer}
           payer={payer}
           receiver={receiver}
+          viewer={data.viewer}
           startAtConfirm={selected.atConfirm}
           onClose={() => setSelected(null)}
-          onBankSaved={handleBankSaved}
           onPaid={handlePaid}
         />
       )}
+
+      <p className="meta">
+        <Icon name="info" size={16} />
+        <span className="grow">
+          Người nhận chưa có mã QR thì vào <Link href="/profile" prefetch={false}>Hồ sơ</Link> để cài
+          tài khoản nhận tiền.
+        </span>
+      </p>
     </main>
   );
 }

@@ -149,6 +149,22 @@ a {
   font-weight: 700;
   text-decoration: none;
   color: var(--text);
+  min-width: 0;
+}
+
+/* The header's right side: profile and logout, each with its name beside the icon. They never
+   shrink or wrap, and the brand wordmark gives way first on a narrow phone. */
+.header-actions {
+  flex: none;
+  gap: 4px;
+}
+
+@media (max-width: 430px) {
+  /* 375px cannot hold the wordmark plus both labelled actions. The icon keeps its accessible
+     name and title, so the home link is still announced and tap-able at 40px. */
+  .app-header .brand span {
+    display: none;
+  }
 }
 
 .group-nav {
@@ -346,6 +362,20 @@ a {
   font-weight: 600;
   background: var(--border);
   color: var(--text);
+}
+
+/* The group owner's badge: the one member nobody else can remove, so it reads as a role. */
+.badge-owner {
+  background: transparent;
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+/* An action that belongs under a row rather than beside it: the link keeps its own width so a
+   tap on empty space does not trigger it. */
+.self-start {
+  align-self: flex-start;
 }
 
 .empty {
@@ -571,14 +601,10 @@ a {
   gap: 8px;
 }
 
-/* A member row grows a bank line (and, when open, the bank form) under the name. */
+/* A member row grows a bank line under the name (read-only: the account lives on the member's
+   own profile, so there is no inline editor here). */
 .member-row {
   gap: 8px;
-}
-
-.bank-edit {
-  border-top: 1px solid var(--border);
-  padding-top: var(--gap);
 }
 
 /* A full-screen sheet on a phone, a centred card on a wider screen. */
