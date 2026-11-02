@@ -62,6 +62,10 @@ export default function LoginPage() {
           />
         </div>
         {error && <p className="error">{error}</p>}
+        <Link className="meta" href="/forgot-password" prefetch={false}>
+          <Icon name="key" size={16} />
+          <span>Quên mật khẩu?</span>
+        </Link>
         <div className="row row-between">
           <Link className="btn btn-ghost" href="/register" prefetch={false}>
             <Icon name="userPlus" />

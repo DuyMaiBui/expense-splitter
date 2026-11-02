@@ -13,7 +13,7 @@ import type { NextRequest } from "next/server";
  * still-present but expired cookie would otherwise bounce them between /login and /groups.
  */
 
-const PUBLIC_PAGE_PATHS = new Set(["/login", "/register"]);
+const PUBLIC_PAGE_PATHS = new Set(["/login", "/register", "/forgot-password", "/reset-password"]);
 
 export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
@@ -23,7 +23,7 @@ export function proxy(request: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
-  // /login and /register are reachable without a session.
+  // /login, /register and the password-reset screens are reachable without a session.
   if (PUBLIC_PAGE_PATHS.has(pathname)) {
     return NextResponse.next();
   }

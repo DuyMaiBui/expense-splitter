@@ -140,6 +140,21 @@ export default function ProfilePage() {
             )}
           </section>
 
+          <section className="card stack">
+            <h2 className="row row-nowrap">
+              <Icon name="lock" />
+              <span>Mật khẩu</span>
+            </h2>
+            <p className="muted">
+              Đổi mật khẩu của chính bạn. Mật khẩu mới chỉ gồm chữ số; đổi xong các thiết bị khác
+              sẽ bị đăng xuất.
+            </p>
+            <Link className="btn btn-ghost self-start" href="/change-password" prefetch={false}>
+              <Icon name="key" />
+              <span>Đổi mật khẩu</span>
+            </Link>
+          </section>
+
           <p className="meta">
             <Icon name="info" size={16} />
             <span className="grow">
