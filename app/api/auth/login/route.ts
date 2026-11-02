@@ -18,6 +18,7 @@ interface LoginRow {
   bank_bin: string | null;
   bank_account_no: string | null;
   bank_account_name: string | null;
+  email: string | null;
 }
 
 export const POST = route(async (req) => {
@@ -32,7 +33,7 @@ export const POST = route(async (req) => {
   const row = await getDb()
     .prepare(
       `SELECT id, username, display_name, password_hash, password_salt, role, banned_at,
-              created_at, bank_bin, bank_account_no, bank_account_name
+              created_at, bank_bin, bank_account_no, bank_account_name, email
        FROM users WHERE username = ?`,
     )
     .bind(body.username)
@@ -64,6 +65,7 @@ export const POST = route(async (req) => {
     role: row.role,
     createdAt: row.created_at,
     bank: toBankInfo(row),
+    email: row.email,
   };
   return ok({ user });
 }, { limit: "auth" }); // brute-force guard: PBKDF2 makes every attempt CPU-expensive

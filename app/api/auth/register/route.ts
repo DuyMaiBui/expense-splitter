@@ -80,6 +80,9 @@ export const POST = route(async (req) => {
     createdAt,
     // A fresh account has no bank profile; it is set later through PUT /api/profile/bank.
     bank: null,
+    // Registration does not ask for an email either; it is set later through
+    // PUT /api/profile/email (the password-recovery channel).
+    email: null,
   };
   return ok({ user }, 201);
 }, { limit: "auth" }); // also caps account-spam writes to D1

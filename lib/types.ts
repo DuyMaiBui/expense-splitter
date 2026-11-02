@@ -12,6 +12,10 @@ export type UserRole = "user" | "admin";
  * `bank` is the caller's OWN receiving account (never another user's): it is returned by
  * register/login/me and edited only through PUT /api/profile/bank. Member rows elsewhere carry
  * the same account, derived from the linked user.
+ *
+ * `email` is the caller's OWN recovery address, normalised (trimmed, lowercased) or null when
+ * unset. It is edited only through PUT /api/profile/email and is the recovery channel for a
+ * forgotten password. `User` is only ever returned for the caller, so it needs no redaction.
  */
 export interface User {
   id: string;
@@ -20,6 +24,7 @@ export interface User {
   role: UserRole;
   createdAt: string;
   bank: BankInfo | null;
+  email: string | null;
 }
 
 /** The minimum an admin response needs to name an account. */

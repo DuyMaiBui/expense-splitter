@@ -214,6 +214,7 @@ interface UserRow {
   bank_bin: string | null;
   bank_account_no: string | null;
   bank_account_name: string | null;
+  email: string | null;
 }
 
 function toUser(row: UserRow): User {
@@ -224,6 +225,7 @@ function toUser(row: UserRow): User {
     role: row.role,
     createdAt: row.created_at,
     bank: toBankInfo(row),
+    email: row.email,
   };
 }
 
@@ -258,7 +260,8 @@ export async function getCurrentUser(): Promise<User | null> {
       `SELECT u.id AS id, u.username AS username, u.display_name AS display_name,
               u.role AS role, u.banned_at AS banned_at, u.created_at AS created_at,
               u.bank_bin AS bank_bin, u.bank_account_no AS bank_account_no,
-              u.bank_account_name AS bank_account_name, s.expires_at AS expires_at
+              u.bank_account_name AS bank_account_name, u.email AS email,
+              s.expires_at AS expires_at
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.id = ? AND s.expires_at > ?`,

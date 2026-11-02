@@ -93,6 +93,53 @@ export function isoDate(value: unknown, field: string): string {
   return new Date(parsed).toISOString();
 }
 
+/** The longest address SMTP allows: 64 (local) + 1 (@) + 189 (domain) is the practical ceiling. */
+export const EMAIL_MAX_LENGTH = 254;
+
+/**
+ * The contract's email shape, read top to bottom:
+ *   `[^\s@]+`       — a non-empty local part with no whitespace and no second "@"
+ *   `@`             — exactly one separator
+ *   `[^\s@]+\.[A-Za-z]{2,}` — a domain that contains a dot and ends in a letters-only TLD of 2+
+ * Consecutive dots are rejected separately (see `parseEmail`), which keeps this readable.
+ */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
+
+/**
+ * Asserts the value is an email address and returns it NORMALISED (trimmed, then lowercased)
+ * so the stored value is stable: the same person typing " A@B.COM " and "a@b.com" yields one
+ * address, and an address is never sent or compared in a second spelling.
+ *
+ * A malformed address is a 400 VALIDATION naming the field, exactly like every other validator
+ * here. `null`/`undefined` are rejected — clearing an email is the route's decision, not the
+ * parser's.
+ */
+export function parseEmail(value: unknown, field = "email"): string {
+  if (typeof value !== "string") {
+    throw badRequest(`Trường "${field}" phải là chuỗi.`);
+  }
+
+  const email = value.trim().toLowerCase();
+
+  if (email.length === 0) {
+    throw badRequest(`Trường "${field}" không được để trống.`);
+  }
+  if (email.length > EMAIL_MAX_LENGTH) {
+    throw badRequest(`Trường "${field}" không được vượt quá ${EMAIL_MAX_LENGTH} ký tự.`);
+  }
+  if (/\s/.test(email)) {
+    throw badRequest(`Trường "${field}" không được chứa khoảng trắng.`);
+  }
+  if (email.includes("..")) {
+    throw badRequest(`Trường "${field}" không được chứa hai dấu chấm liền nhau.`);
+  }
+  if (!EMAIL_PATTERN.test(email)) {
+    throw badRequest(`Trường "${field}" không phải là địa chỉ email hợp lệ.`);
+  }
+
+  return email;
+}
+
 /** Asserts the value is an array of strings, optionally length-bounded. */
 export function strArray(value: unknown, field: string, options: ArrayOptions = {}): string[] {
   if (!Array.isArray(value)) {

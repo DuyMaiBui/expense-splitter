@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BankLogo } from "@/components/BankPicker";
 import { Icon, IconButton } from "@/components/Icon";
 import { ProfileBankForm } from "@/components/ProfileBankForm";
+import { ProfileEmailForm } from "@/components/ProfileEmailForm";
 import { api } from "@/lib/api-client";
 import type { User } from "@/lib/types";
 import { bankByBin } from "@/lib/vietqr";
@@ -13,9 +14,11 @@ import { bankByBin } from "@/lib/vietqr";
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
 
 /**
- * The caller's own profile: who they are, and the ONE receiving account the whole app uses for
- * them. A group member's `bank` is derived from this row, so saving here updates every QR the
- * other members can scan — and because the write has no id parameter, nobody else can change it.
+ * The caller's own profile: who they are, the ONE receiving account the whole app uses for them,
+ * and the recovery email a forgotten password is reset through. A group member's `bank` is
+ * derived from this row, so saving here updates every QR the other members can scan — and because
+ * the write has no id parameter, nobody else can change it. Neither field is ever returned for
+ * anyone but its owner.
  */
 export default function ProfilePage() {
   const [user, setUser] = useState<User | null>(null);
@@ -103,6 +106,33 @@ export default function ProfilePage() {
                     outcome === "cleared"
                       ? "Đã xóa tài khoản nhận tiền."
                       : "Đã lưu tài khoản nhận tiền.",
+                  );
+                }}
+              />
+            )}
+          </section>
+
+          <section className="card stack">
+            <h2 className="row row-nowrap">
+              <Icon name="at" />
+              <span>Email khôi phục</span>
+            </h2>
+            <p className="muted">
+              Địa chỉ này dùng để đặt lại mật khẩu khi bạn quên. Chỉ bạn xem và thay đổi được.
+            </p>
+
+            {user.role === "admin" ? (
+              <p className="muted">Tài khoản quản trị không dùng email khôi phục.</p>
+            ) : (
+              <ProfileEmailForm
+                // A saved address replaces the form's initial state, so a clear/save
+                // round-trip starts from what the server just stored.
+                key={user.email ?? "no-email"}
+                initial={user.email}
+                onSaved={(savedUser, outcome) => {
+                  setUser(savedUser);
+                  setNotice(
+                    outcome === "cleared" ? "Đã xóa email khôi phục." : "Đã lưu email khôi phục.",
                   );
                 }}
               />
