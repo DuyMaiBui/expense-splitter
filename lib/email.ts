@@ -3,14 +3,17 @@ import { DEFAULT_FROM, readEmailEnv, type EmailEnv } from "./env";
 /**
  * The email transport seam.
  *
- * The reset flow only ever calls `EmailSender#send`; WHICH provider delivers the message is
- * resolved by `getEmailSender` from the Worker's bindings. Swapping providers (or adding a
- * second one) means adding an implementation here, never touching lib/password-reset.ts or the
- * route handlers.
+ * The reset flow only ever calls `EmailSender#send`; the sender is resolved by `getEmailSender`
+ * from the Worker's environment. Resend is the provider: `RESEND_API_KEY` present means Resend,
+ * absent means no delivery. Adding a second provider means adding an implementation here, never
+ * touching lib/password-reset.ts or the route handlers.
  *
- * Degraded state is deliberate and quiet: with no provider configured the returned sender logs
- * one warning and sends nothing. Throwing there would leak "email is configured" versus not on
- * the always-200 forgot-password response, so the flow simply never completes for that user.
+ * The key comes from a local `.env` in development and a Worker secret in production — never from
+ * the vault, and nothing here looks one up.
+ *
+ * Degraded state is deliberate and quiet: with no key the returned sender logs one warning and
+ * sends nothing. Throwing there would leak "email is configured" versus not on the always-200
+ * forgot-password response, so the flow simply never completes for that user.
  */
 
 export interface EmailMessage {
@@ -26,7 +29,7 @@ export interface EmailSender {
 /** What `getEmailSender` decided, for a route that wants to log the degraded state once. */
 export interface EmailSenderInfo {
   sender: EmailSender;
-  /** Provider name when configured ("resend"), null when no provider is configured. */
+  /** Provider name when configured ("resend"), null when there is no API key. */
   provider: string | null;
 }
 
@@ -34,7 +37,7 @@ const RESEND_ENDPOINT = "https://api.resend.com/emails";
 /** A hung provider must not hold the Worker open; the reset code is already stored either way. */
 const SEND_TIMEOUT_MS = 10_000;
 
-/** A sender that delivers nothing. Used when no provider is configured. */
+/** A sender that delivers nothing. Used when `RESEND_API_KEY` is absent. */
 export class NoOpEmailSender implements EmailSender {
   private warned = false;
 
@@ -42,7 +45,7 @@ export class NoOpEmailSender implements EmailSender {
     if (!this.warned) {
       this.warned = true;
       console.warn(
-        "[email] no provider configured (EMAIL_PROVIDER/EMAIL_API_KEY): dropping message to",
+        "[email] RESEND_API_KEY is not set (add it to .env locally, as a Worker secret in production): dropping message to",
         msg.to,
       );
     }
@@ -84,17 +87,17 @@ export class ResendEmailSender implements EmailSender {
 /**
  * The sender for this request.
  *
- * Configuration is all-or-nothing: a provider name without an API key (or vice versa) is treated
- * as unconfigured rather than as a half-built sender, so the caller never sees a request leave
- * for a provider it cannot authenticate with.
+ * Resend is the only provider, so the presence of the key IS the configuration: there is no
+ * provider name to set, and a blank key is "not configured" rather than a half-built sender.
  */
 export function getEmailSenderDetails(env: EmailEnv = readEmailEnv()): EmailSenderInfo {
-  const provider = env.EMAIL_PROVIDER?.toLowerCase();
+  const apiKey = env.RESEND_API_KEY?.trim();
+  const from = env.RESEND_FROM?.trim();
 
-  if (provider === "resend" && env.EMAIL_API_KEY) {
+  if (apiKey) {
     return {
       provider: "resend",
-      sender: new ResendEmailSender(env.EMAIL_API_KEY, env.EMAIL_FROM ?? DEFAULT_FROM),
+      sender: new ResendEmailSender(apiKey, from || DEFAULT_FROM),
     };
   }
 

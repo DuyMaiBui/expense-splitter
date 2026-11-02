@@ -24,19 +24,20 @@ describe("getEmailSenderDetails", () => {
     await sender.send({ to: "a@b.com", subject: "s", text: "t" });
 
     expect(warn).toHaveBeenCalledTimes(1);
+    // The warning names the one variable an operator has to set.
+    expect(String(warn.mock.calls[0]![0])).toContain("RESEND_API_KEY");
     warn.mockRestore();
   });
 
-  it("treats a provider without an API key as unconfigured (never a half-built sender)", () => {
-    expect(getEmailSenderDetails({ EMAIL_PROVIDER: "resend" }).provider).toBeNull();
-    expect(getEmailSenderDetails({ EMAIL_API_KEY: "re_123" }).provider).toBeNull();
+  it("treats a blank key as unconfigured (never a half-built sender)", () => {
+    expect(getEmailSenderDetails({ RESEND_API_KEY: "" }).provider).toBeNull();
+    expect(getEmailSenderDetails({ RESEND_API_KEY: "   " }).provider).toBeNull();
   });
 
-  it("resolves Resend when the name and the key are both present", () => {
+  it("resolves Resend when the key is present", () => {
     const { sender, provider } = getEmailSenderDetails({
-      EMAIL_PROVIDER: "Resend",
-      EMAIL_API_KEY: "re_123",
-      EMAIL_FROM: "App <no-reply@app.test>",
+      RESEND_API_KEY: "re_123",
+      RESEND_FROM: "App <no-reply@app.test>",
     });
     expect(provider).toBe("resend");
     expect(sender).toBeInstanceOf(ResendEmailSender);
@@ -49,38 +50,29 @@ describe("getEmailSenderDetails", () => {
 
 describe("readEmailEnv", () => {
   const saved = { ...process.env };
+  const NAMES = ["RESEND_API_KEY", "RESEND_FROM"];
 
   afterEach(() => {
-    for (const name of ["EMAIL_PROVIDER", "EMAIL_API_KEY", "EMAIL_FROM", "RESEND_API_KEY"]) {
+    for (const name of NAMES) {
       if (saved[name] === undefined) delete process.env[name];
       else process.env[name] = saved[name];
     }
   });
 
   it("resolves nothing when no binding is set", () => {
-    for (const name of ["EMAIL_PROVIDER", "EMAIL_API_KEY", "EMAIL_FROM", "RESEND_API_KEY"]) {
-      delete process.env[name];
-    }
-    expect(readEmailEnv()).toEqual({
-      EMAIL_PROVIDER: undefined,
-      EMAIL_API_KEY: undefined,
-      EMAIL_FROM: undefined,
-    });
+    for (const name of NAMES) delete process.env[name];
+    expect(readEmailEnv()).toEqual({ RESEND_API_KEY: undefined, RESEND_FROM: undefined });
   });
 
-  it("treats RESEND_API_KEY alone as a configured Resend sender", () => {
-    for (const name of ["EMAIL_PROVIDER", "EMAIL_API_KEY", "EMAIL_FROM"]) delete process.env[name];
+  it("reads RESEND_API_KEY from the environment (.env locally, Worker secret in production)", () => {
     process.env.RESEND_API_KEY = "re_abc";
 
-    // The operator sets the key named after the provider; there is nothing left to infer.
-    expect(readEmailEnv()).toMatchObject({ EMAIL_PROVIDER: "resend", EMAIL_API_KEY: "re_abc" });
+    expect(readEmailEnv()).toEqual({ RESEND_API_KEY: "re_abc", RESEND_FROM: undefined });
     expect(getEmailSenderDetails(readEmailEnv()).provider).toBe("resend");
   });
 
-  it("ignores blank bindings instead of building a sender from them", () => {
-    process.env.EMAIL_PROVIDER = "   ";
-    process.env.EMAIL_API_KEY = "";
-    delete process.env.RESEND_API_KEY;
+  it("ignores a blank value instead of building a sender from it", () => {
+    process.env.RESEND_API_KEY = "   ";
 
     expect(getEmailSenderDetails(readEmailEnv()).provider).toBeNull();
   });
@@ -118,7 +110,7 @@ describe("ResendEmailSender", () => {
     });
   });
 
-  it("falls back to the documented sender when EMAIL_FROM is not set", async () => {
+  it("falls back to the documented sender when RESEND_FROM is not set", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const sender = new ResendEmailSender(
       "re_secret",

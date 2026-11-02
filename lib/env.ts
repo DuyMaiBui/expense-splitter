@@ -1,30 +1,28 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 /**
- * Email transport settings, read from the Worker's environment bindings.
+ * Email transport settings, read from the Worker's environment.
  *
- * These three bindings are NOT declared in wrangler.jsonc yet. Provisioning them is a deploy-time
- * step (see docs/CONTRACT.md § PASSWORD RESET):
- *   EMAIL_PROVIDER  — plain var, "resend" selects the Resend sender; anything else, or unset,
- *                     yields the NoOp sender.
- *   EMAIL_API_KEY   — SECRET (`wrangler secret put EMAIL_API_KEY`), never a plain var.
- *                     `RESEND_API_KEY` is accepted as an alias, and setting it alone also selects
- *                     the Resend sender: a key named after the provider leaves nothing to infer.
- *   EMAIL_FROM      — plain var, the verified sender, e.g. "Chia tiền nhóm <no-reply@example.com>".
+ * Resend is the provider; the only required value is the API key, read from the scalar
+ * `RESEND_API_KEY`:
+ *   - production — a Worker SECRET (`cf workers secrets bulk`, never a plain var);
+ *   - local — a line in `.env` (gitignored; `.env.example` carries the placeholder), which both
+ *     `npm run dev` and `npx opennextjs-cloudflare dev` read.
+ *
+ * `RESEND_FROM` is optional: the verified sender `From` address. Unset means Resend's shared test
+ * sender, which only delivers to the Resend account owner — fine locally, not for real users.
  *
  * Reading is defensive on purpose: this module is imported by the always-200 forgot-password
- * path, so an environment that has no bindings at all (tests, `next dev` without the adapter,
- * a Worker with the secrets not provisioned yet) must resolve to "not configured", never throw.
+ * path, so an environment with no bindings at all (tests, a Worker whose secret is not set yet)
+ * must resolve to "not configured", never throw.
  */
 
 export interface EmailEnv {
-  EMAIL_PROVIDER?: string;
-  EMAIL_API_KEY?: string;
-  EMAIL_FROM?: string;
+  RESEND_API_KEY?: string;
+  RESEND_FROM?: string;
 }
 
-
-/** Resend's shared test sender, used only when EMAIL_FROM is unset. */
+/** Resend's shared test sender, used only when RESEND_FROM is unset. */
 export const DEFAULT_FROM = "Chia tiền nhóm <onboarding@resend.dev>";
 
 function optionalString(value: unknown): string | undefined {
@@ -36,11 +34,11 @@ function optionalString(value: unknown): string | undefined {
 }
 
 /**
- * The email bindings for the current request.
+ * The email settings for the current request.
  *
  * `getCloudflareContext()` reads a request-scoped AsyncLocalStorage context and throws outside
  * one, so a failure is a normal "no bindings here" and falls through to `process.env` (which is
- * how the Vitest run and a plain `next dev` see them).
+ * how the Vitest run and a plain `next dev` see `.env`).
  */
 export function readEmailEnv(): EmailEnv {
   let bindings: Record<string, unknown> = {};
@@ -55,13 +53,8 @@ export function readEmailEnv(): EmailEnv {
     return optionalString(bindings[name]) ?? optionalString(process.env[name]);
   }
 
-  const resendKey = read("RESEND_API_KEY");
-  const apiKey = read("EMAIL_API_KEY") ?? resendKey;
-
   return {
-    // A key named after the provider selects it: setting RESEND_API_KEY alone must be enough.
-    EMAIL_PROVIDER: read("EMAIL_PROVIDER") ?? (resendKey ? "resend" : undefined),
-    EMAIL_API_KEY: apiKey,
-    EMAIL_FROM: read("EMAIL_FROM"),
+    RESEND_API_KEY: read("RESEND_API_KEY"),
+    RESEND_FROM: read("RESEND_FROM"),
   };
 }

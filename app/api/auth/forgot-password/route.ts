@@ -68,7 +68,7 @@ export const POST = route(
       if (!provider) {
         // Nothing was delivered, so this user's reset can never complete. Log the fact once per
         // attempt (the NoOp sender also warns once per isolate); the client still sees success.
-        console.warn("[auth] forgot-password: no email provider configured; code not delivered");
+        console.warn("[auth] forgot-password: RESEND_API_KEY is not set; code not delivered");
       }
     } catch (error) {
       // Delivery failing is not the caller's business, and it must not turn the always-200 into
