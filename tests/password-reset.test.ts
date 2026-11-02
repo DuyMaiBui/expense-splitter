@@ -269,7 +269,7 @@ describe("POST /api/auth/forgot-password", () => {
 // ---------------------------------------------------------------------------- reset
 
 describe("POST /api/auth/reset-password", () => {
-  it("sets a digits-only password, deletes every session and burns the code", async () => {
+  it("sets a password with letters and symbols, deletes every session and burns the code", async () => {
     const { client, userId, username } = await signUp("secret1");
     await signInSecondDevice(username, "secret1");
     await setEmail(userId, "an@example.com");
@@ -279,8 +279,9 @@ describe("POST /api/auth/reset-password", () => {
 
     expect(sessionCount(userId)).toBe(2);
 
+    const newPassword = "New-P@ssw0rd!";
     const res = await call(new Client(), resetPasswordPOST, {
-      body: { username, code, newPassword: "987654" },
+      body: { username, code, newPassword },
     });
 
     expect(res.status).toBe(200);
@@ -295,7 +296,7 @@ describe("POST /api/auth/reset-password", () => {
     expect(oldLogin.status).toBe(401);
 
     const newLogin = await call(new Client(), loginPOST, {
-      body: { username, password: "987654" },
+      body: { username, password: newPassword },
       headers: { "cf-connecting-ip": "10.9.9.2" },
     });
     expect(newLogin.status).toBe(200);
@@ -352,16 +353,17 @@ describe("POST /api/auth/reset-password", () => {
     expect(wrongUser.json.error.message).toBe(wrongCode.json.error.message);
   });
 
-  it("rejects a non-digit or too-short new password with 400 VALIDATION", async () => {
+  it("rejects a new password outside 6..128 characters, whatever its characters", async () => {
     const { userId, username } = await signUp("secret1");
     await setEmail(userId, "an@example.com");
     await call(new Client(), forgotPasswordPOST, { body: { username } });
     const code = lastCode();
 
-    for (const newPassword of ["abcdef", "12345", "12a456", "123 456"]) {
+    for (const newPassword of ["12345", "abcde", "a".repeat(129)]) {
       const res = await call(new Client(), resetPasswordPOST, { body: { username, code, newPassword } });
       expect(res.status, newPassword).toBe(400);
       expect(res.json.error.code).toBe("VALIDATION");
+      expect(res.json.error.message).not.toContain("chữ số");
     }
   });
 
@@ -440,13 +442,32 @@ describe("POST /api/auth/change-password", () => {
     expect(passwordRow(userId)).toEqual(before);
   });
 
-  it("rejects a non-digit new password", async () => {
+  it("accepts a new password with letters and symbols", async () => {
+    const { client, username } = await signUp("secret1");
+
+    const newPassword = "12a456!";
+    const res = await call(client, changePasswordPOST, {
+      body: { currentPassword: "secret1", newPassword },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, data: {} });
+
+    const relogin = await call(new Client(), loginPOST, {
+      body: { username, password: newPassword },
+      headers: { "cf-connecting-ip": "10.9.8.2" },
+    });
+    expect(relogin.status).toBe(200);
+  });
+
+  it("rejects a new password outside 6..128 characters", async () => {
     const { client } = await signUp("secret1");
 
-    for (const newPassword of ["abcdef", "12a456", "123 456"]) {
+    for (const newPassword of ["12345", "a".repeat(129)]) {
       const res = await call(client, changePasswordPOST, { body: { currentPassword: "secret1", newPassword } });
       expect(res.status, newPassword).toBe(400);
-      expect(res.json.error.message).toContain("chữ số");
+      expect(res.json.error.code).toBe("VALIDATION");
+      expect(res.json.error.message).not.toContain("chữ số");
     }
   });
 

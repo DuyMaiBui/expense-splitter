@@ -4,7 +4,7 @@ import { forgetUserSessions, hashPassword, requireUser, SESSION_COOKIE, verifyPa
 import { getDb } from "@/lib/db";
 import { badRequest } from "@/lib/errors";
 import { ok, readJson, route } from "@/lib/http";
-import { parseNumericPassword } from "@/lib/password-reset";
+import { parseNewPassword } from "@/lib/password-reset";
 import { obj, str } from "@/lib/validate";
 
 interface CredentialRow {
@@ -34,7 +34,8 @@ async function currentSessionId(): Promise<string | null> {
  * Changes the caller's own password (docs/CONTRACT.md § PASSWORD RESET).
  *
  * The current password is checked with the same primitive login uses, so a borrowed device cannot
- * become a takeover. The new password is digits only (the product requirement). Every OTHER
+ * become a takeover. The new password follows the registration rule (6..128 characters, any
+ * characters, untrimmed). Every OTHER
  * session of the user is deleted — a password change must sign out the other devices — while the
  * caller's own session is kept, so changing a password does not bounce the person doing it.
  *
@@ -50,7 +51,7 @@ export const POST = route(
       return {
         // Never trimmed: leading/trailing spaces are part of the existing secret.
         currentPassword: str(o.currentPassword, "currentPassword", { min: 1, max: 128, trim: false }),
-        newPassword: parseNumericPassword(o.newPassword),
+        newPassword: parseNewPassword(o.newPassword),
       };
     });
 

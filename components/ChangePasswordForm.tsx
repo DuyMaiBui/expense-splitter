@@ -26,8 +26,8 @@ export function ChangePasswordForm() {
     setError(null);
     setNotice(null);
 
-    if (!/^[0-9]{6,128}$/.test(newPassword)) {
-      setError("Mật khẩu mới phải gồm từ 6 đến 128 chữ số.");
+    if (newPassword.length < 6 || newPassword.length > 128) {
+      setError("Mật khẩu mới phải có từ 6 đến 128 ký tự.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -76,7 +76,7 @@ export function ChangePasswordForm() {
 
       <div>
         <label className="label" htmlFor={`${fieldId}-new`}>
-          Mật khẩu mới (chỉ chữ số)
+          Mật khẩu mới
         </label>
         <div className="field">
           <Icon name="key" />
@@ -84,14 +84,11 @@ export function ChangePasswordForm() {
             id={`${fieldId}-new`}
             className="input"
             type="password"
-            inputMode="numeric"
             autoComplete="new-password"
-            pattern="[0-9]{6,128}"
-            title="Ít nhất 6 chữ số"
             placeholder="Mật khẩu mới"
             aria-label="Mật khẩu mới"
             value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value.replace(/\D/g, ""))}
+            onChange={(e) => setNewPassword(e.target.value)}
             required
           />
         </div>
@@ -107,13 +104,11 @@ export function ChangePasswordForm() {
             id={`${fieldId}-confirm`}
             className="input"
             type="password"
-            inputMode="numeric"
             autoComplete="new-password"
-            pattern="[0-9]{6,128}"
             placeholder="Nhập lại mật khẩu mới"
             aria-label="Nhập lại mật khẩu mới"
             value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value.replace(/\D/g, ""))}
+            onChange={(e) => setConfirmPassword(e.target.value)}
             required
           />
         </div>
@@ -123,8 +118,8 @@ export function ChangePasswordForm() {
       {notice && <p className="success">{notice}</p>}
 
       <p className="muted">
-        Mật khẩu mới chỉ gồm chữ số, ít nhất 6 chữ số. Đổi mật khẩu sẽ đăng xuất các thiết bị
-        khác; thiết bị này vẫn đăng nhập.
+        Mật khẩu mới có ít nhất 6 ký tự, tối đa 128 ký tự, gồm chữ, số và ký tự đặc biệt. Đổi mật
+        khẩu sẽ đăng xuất các thiết bị khác; thiết bị này vẫn đăng nhập.
       </p>
 
       <div className="row row-between">

@@ -11,8 +11,8 @@ import { api } from "@/lib/api-client";
  * Screen 2 of "quên mật khẩu": username + the 6-digit code from the email + the new password.
  *
  * The username is prefilled from `?username=` when screen 1 sends it along, so the common path is
- * one field less to mistype. The new password is digits only — the rule is stated on screen
- * before the request rather than after a 400.
+ * one field less to mistype. The new password follows the registration rule (6..128 characters,
+ * any characters) — stated on screen before the request rather than after a 400.
  */
 function ResetPasswordForm() {
   const router = useRouter();
@@ -31,8 +31,8 @@ function ResetPasswordForm() {
       setError("Mã xác nhận phải gồm đúng 6 chữ số.");
       return;
     }
-    if (!/^[0-9]{6,128}$/.test(newPassword)) {
-      setError("Mật khẩu mới phải gồm từ 6 đến 128 chữ số.");
+    if (newPassword.length < 6 || newPassword.length > 128) {
+      setError("Mật khẩu mới phải có từ 6 đến 128 ký tự.");
       return;
     }
 
@@ -59,7 +59,7 @@ function ResetPasswordForm() {
 
       <form className="stack" onSubmit={handleSubmit}>
         <p className="muted">
-          Nhập tên đăng nhập, mã 6 chữ số trong email và mật khẩu mới (chỉ gồm chữ số).
+          Nhập tên đăng nhập, mã 6 chữ số trong email và mật khẩu mới.
         </p>
 
         <div className="field">
@@ -98,14 +98,11 @@ function ResetPasswordForm() {
           <input
             className="input"
             type="password"
-            inputMode="numeric"
             autoComplete="new-password"
-            pattern="[0-9]{6,128}"
-            title="Ít nhất 6 chữ số"
-            placeholder="Mật khẩu mới (chỉ chữ số)"
+            placeholder="Mật khẩu mới (ít nhất 6 ký tự)"
             aria-label="Mật khẩu mới"
             value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value.replace(/\D/g, ""))}
+            onChange={(e) => setNewPassword(e.target.value)}
             required
           />
         </div>

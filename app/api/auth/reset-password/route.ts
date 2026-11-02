@@ -2,7 +2,7 @@ import { forgetUserSessions, hashPassword } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { badRequest } from "@/lib/errors";
 import { ok, readJson, route } from "@/lib/http";
-import { clearResetCodes, parseNumericPassword, parseResetCode, verifyResetCode } from "@/lib/password-reset";
+import { clearResetCodes, parseNewPassword, parseResetCode, verifyResetCode } from "@/lib/password-reset";
 import type { UserRole } from "@/lib/types";
 import { obj, str } from "@/lib/validate";
 
@@ -17,8 +17,9 @@ const INVALID_CODE = "Mã xác nhận không đúng hoặc đã hết hạn. Vui
 /**
  * Completes the "quên mật khẩu" flow (docs/CONTRACT.md § PASSWORD RESET).
  *
- * Looks the user up by username, verifies the emailed code, then replaces the password with a
- * digits-only one. EVERY session of that user is deleted, so anyone holding a stolen login is
+ * Looks the user up by username, verifies the emailed code, then replaces the password with one
+ * obeying the registration rule (6..128 characters, any characters, untrimmed). EVERY session of
+ * that user is deleted, so anyone holding a stolen login is
  * signed out at once. A wrong username and a wrong code produce the same 400, so the response
  * reveals nothing about which accounts exist.
  */
@@ -29,7 +30,7 @@ export const POST = route(
       return {
         username: str(o.username, "username", { min: 1, max: 32 }).toLowerCase(),
         code: parseResetCode(o.code),
-        newPassword: parseNumericPassword(o.newPassword),
+        newPassword: parseNewPassword(o.newPassword),
       };
     });
 

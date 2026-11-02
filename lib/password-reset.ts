@@ -1,5 +1,6 @@
 import { hashPassword, verifyPassword } from "./auth";
 import { badRequest } from "./errors";
+import { str } from "./validate";
 
 /**
  * The "quên mật khẩu" one-time code: generation, storage and verification.
@@ -27,7 +28,6 @@ export const PASSWORD_MAX_LENGTH = 128;
 const DIGIT_SPACE = 10;
 /** Bytes at or above this would bend the distribution toward the low digits. */
 const MAX_UNBIASED_BYTE = 256 - (256 % DIGIT_SPACE); // 250
-const DIGITS_ONLY = /^[0-9]+$/;
 const CODE_PATTERN = /^[0-9]{6}$/;
 
 /** Test seam: the byte source `generateNumericCode` draws from (WebCrypto by default). */
@@ -72,32 +72,19 @@ export function parseResetCode(value: unknown, field = "code"): string {
 }
 
 /**
- * A NEW password for the reset and change flows: digits only (the product requirement), at
- * least 6 and at most 128 characters.
+ * A NEW password for the reset, change and registration flows.
  *
- * The length/type checks reuse `lib/validate.ts#str` conventions, so the messages match every
- * other payload error; the digits rule is specific to a new password and names its field.
+ * ONE rule, everywhere: at least `PASSWORD_MIN_LENGTH` and at most `PASSWORD_MAX_LENGTH`
+ * characters, any characters allowed, never trimmed (a space is part of the secret, not
+ * padding). It is `lib/validate.ts#str` with those two bounds, so the type/length messages are
+ * exactly the ones every other payload error uses, and there is no character-class rule.
  */
-export function parseNumericPassword(value: unknown, field = "newPassword"): string {
-  if (typeof value !== "string") {
-    throw badRequest(`Trường "${field}" phải là chuỗi.`);
-  }
-
-  // Passwords are never trimmed: a space is never part of a valid numeric password, and
-  // trimming would silently accept it.
-  const password = value;
-
-  if (password.length < PASSWORD_MIN_LENGTH) {
-    throw badRequest(`Trường "${field}" phải có ít nhất ${PASSWORD_MIN_LENGTH} ký tự.`);
-  }
-  if (password.length > PASSWORD_MAX_LENGTH) {
-    throw badRequest(`Trường "${field}" không được vượt quá ${PASSWORD_MAX_LENGTH} ký tự.`);
-  }
-  if (!DIGITS_ONLY.test(password)) {
-    throw badRequest(`Trường "${field}" chỉ được gồm các chữ số.`);
-  }
-
-  return password;
+export function parseNewPassword(value: unknown, field = "newPassword"): string {
+  return str(value, field, {
+    min: PASSWORD_MIN_LENGTH,
+    max: PASSWORD_MAX_LENGTH,
+    trim: false,
+  });
 }
 
 /** The subject line of the reset email (Vietnamese, like the rest of the UI). */

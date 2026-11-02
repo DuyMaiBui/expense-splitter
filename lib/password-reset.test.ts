@@ -13,7 +13,7 @@ import {
   clearResetCodes,
   createResetCode,
   generateNumericCode,
-  parseNumericPassword,
+  parseNewPassword,
   parseResetCode,
   verifyResetCode,
 } from "./password-reset";
@@ -103,29 +103,53 @@ describe("parseResetCode", () => {
   );
 });
 
-describe("parseNumericPassword", () => {
-  it("accepts a digits-only password", () => {
-    expect(parseNumericPassword("123456")).toBe("123456");
-  });
-
-  it("accepts a long digits-only password up to 128 characters", () => {
-    const long = "9".repeat(128);
-    expect(parseNumericPassword(long)).toBe(long);
-  });
-
-  it("rejects letters, symbols and mixed passwords", () => {
-    for (const value of ["12345a", "secret1", "123 456", "123-456", "①②③④⑤⑥"]) {
-      expect(() => parseNumericPassword(value), value).toThrowError(ApiError);
+describe("parseNewPassword", () => {
+  it("accepts letters, digits and symbols", () => {
+    for (const value of ["abc123", "P@ssw0rd!", "mật khẩu", "123456", "!!!@@@###"]) {
+      expect(parseNewPassword(value), value).toBe(value);
     }
   });
 
-  it("keeps the 6-character minimum and the 128-character maximum", () => {
-    expect(() => parseNumericPassword("12345")).toThrowError(/ít nhất 6 ký tự/);
-    expect(() => parseNumericPassword("9".repeat(129))).toThrowError(/vượt quá 128 ký tự/);
+  it("accepts exactly 6 and exactly 128 characters", () => {
+    const shortest = "a".repeat(6);
+    const longest = "a".repeat(128);
+    expect(parseNewPassword(shortest)).toBe(shortest);
+    expect(parseNewPassword(longest)).toBe(longest);
   });
 
-  it("does not trim: a padded value is not a digits-only password", () => {
-    expect(() => parseNumericPassword(" 123456 ")).toThrowError(/chỉ được gồm các chữ số/);
+  it("keeps the 6-character minimum and the 128-character maximum", () => {
+    expect(() => parseNewPassword("a".repeat(5))).toThrowError(/ít nhất 6 ký tự/);
+    expect(() => parseNewPassword("a".repeat(129))).toThrowError(/vượt quá 128 ký tự/);
+  });
+
+  it("rejects a non-string with a VALIDATION error naming the field", () => {
+    for (const value of [42, null, undefined, {}, ["123456"]]) {
+      expect(() => parseNewPassword(value), String(value)).toThrowError(ApiError);
+    }
+    try {
+      parseNewPassword(42, "newPassword");
+    } catch (error) {
+      const apiError = error as ApiError;
+      expect(apiError.code).toBe("VALIDATION");
+      expect(apiError.status).toBe(400);
+      expect(apiError.message).toContain("newPassword");
+      expect(apiError.message).toContain("chuỗi");
+    }
+  });
+
+  it("does not trim: padded and whitespace-only values are valid and returned unchanged", () => {
+    expect(parseNewPassword(" 123456 ")).toBe(" 123456 ");
+    expect(parseNewPassword("      ")).toBe("      ");
+  });
+
+  it("enforces no character class: no message names digits", () => {
+    for (const value of ["", "a".repeat(5), "a".repeat(129)]) {
+      try {
+        parseNewPassword(value);
+      } catch (error) {
+        expect((error as ApiError).message).not.toContain("chữ số");
+      }
+    }
   });
 });
 

@@ -4,6 +4,7 @@ import { badRequest, conflict, rateLimited } from "@/lib/errors";
 import { ABUSE } from "@/lib/guard";
 import { clientKey } from "@/lib/rate-limit";
 import { ok, readJson, route } from "@/lib/http";
+import { parseNewPassword } from "@/lib/password-reset";
 import type { User } from "@/lib/types";
 import { obj, str } from "@/lib/validate";
 
@@ -26,8 +27,9 @@ export const POST = route(async (req) => {
     return {
       username,
       displayName: str(o.displayName, "displayName", { min: 1, max: 50 }),
-      // Passwords are never trimmed: leading/trailing spaces are part of the secret.
-      password: str(o.password, "password", { min: 6, max: 128, trim: false }),
+      // Passwords are never trimmed: leading/trailing spaces are part of the secret. The rule
+      // lives in one place (lib/password-reset.ts), shared with reset and change.
+      password: parseNewPassword(o.password, "password"),
     };
   });
 
