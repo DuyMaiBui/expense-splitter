@@ -211,13 +211,115 @@ describe("profile email", () => {
     expect((await call(bob, meGET)).json.data.user.email).toBe("bob@example.com");
   });
 
-  it("allows two accounts to share one address (no uniqueness constraint)", async () => {
+  it("refuses an address already held by another account with 409", async () => {
     const alice = await account("alice");
     const bob = await account("bob");
+    await setEmail(alice, { email: "shared@example.com" });
 
-    expect((await setEmail(alice, { email: "family@example.com" })).status).toBe(200);
-    expect((await setEmail(bob, { email: "family@example.com" })).status).toBe(200);
-    expect(storedEmail("alice")).toBe("family@example.com");
-    expect(storedEmail("bob")).toBe("family@example.com");
+    const r = await setEmail(bob, { email: "shared@example.com" });
+    expect(r.status).toBe(409);
+    expect(r.json.error.code).toBe("CONFLICT");
+    // Bob kept whatever he had, and Alice's address is untouched.
+    expect(storedEmail("bob")).toBeNull();
+    expect(storedEmail("alice")).toBe("shared@example.com");
+  });
+
+  it("treats a differently-cased duplicate as the same address", async () => {
+    const alice = await account("alice");
+    const bob = await account("bob");
+    await setEmail(alice, { email: "shared@example.com" });
+
+    // parseEmail lowercases, so the pre-check already matches; the NOCASE column is the schema
+    // guarantee for any value that arrives by another path.
+    const r = await setEmail(bob, { email: "  SHARED@Example.COM " });
+    expect(r.status).toBe(409);
+    expect(r.json.error.code).toBe("CONFLICT");
+    expect(storedEmail("bob")).toBeNull();
+  });
+
+  it("lets the caller re-set their own current address as a no-op success", async () => {
+    const c = await account("alice");
+    await setEmail(c, { email: "alice@example.com" });
+
+    const again = await setEmail(c, { email: "alice@example.com" });
+    expect(again.status).toBe(200);
+    expect(again.json.data.user.email).toBe("alice@example.com");
+
+    // Same address, different spelling: still the caller's own row, so still a success.
+    const recased = await setEmail(c, { email: "  Alice@Example.Com  " });
+    expect(recased.status).toBe(200);
+    expect(recased.json.data.user.email).toBe("alice@example.com");
+  });
+
+  it("lets the caller clear every other account's view of their address", async () => {
+    const alice = await account("alice");
+    const bob = await account("bob");
+    await setEmail(alice, { email: "shared@example.com" });
+
+    // Alice frees the address, then Bob may take it.
+    expect((await setEmail(alice, { email: null })).status).toBe(200);
+    expect((await setEmail(bob, { email: "shared@example.com" })).status).toBe(200);
+    expect(storedEmail("alice")).toBeNull();
+    expect(storedEmail("bob")).toBe("shared@example.com");
+  });
+
+  it("lets many accounts have no address at all (the index is partial)", async () => {
+    const alice = await account("alice");
+    const bob = await account("bob");
+    const chi = await account("chi");
+
+    expect(storedEmail("alice")).toBeNull();
+    expect(storedEmail("bob")).toBeNull();
+    expect(storedEmail("chi")).toBeNull();
+
+    // Clearing twice, after a set and from a never-set account, is never a collision either.
+    await setEmail(alice, { email: "alice@example.com" });
+    expect((await setEmail(alice, { email: null })).status).toBe(200);
+    expect((await setEmail(alice, { email: null })).status).toBe(200);
+    expect((await setEmail(bob, { email: null })).status).toBe(200);
+    expect(storedEmail("alice")).toBeNull();
+    expect(storedEmail("bob")).toBeNull();
+  });
+
+  it("maps a real unique-index violation to 409, not a 500", async () => {
+    const alice = await account("alice");
+    await setEmail(alice, { email: "shared@example.com" });
+    await account("bob");
+
+    // The clean pre-check is not the guarantee: write straight past it, the way a racing writer
+    // would, and confirm the database itself refuses the duplicate with this column's message.
+    const bobRow = testDb.raw
+      .prepare("SELECT id FROM users WHERE username = 'bob'")
+      .get() as { id: string };
+    expect(() =>
+      testDb.raw
+        .prepare("UPDATE users SET email = 'shared@example.com' WHERE id = ?")
+        .run(bobRow.id),
+    ).toThrow(/UNIQUE constraint failed: users\.email/);
+    expect(storedEmail("bob")).toBeNull();
+  });
+
+  it("turns a race past the pre-check into 409, never a 500", async () => {
+    const alice = await account("alice");
+    await setEmail(alice, { email: "shared@example.com" });
+    const bob = await account("bob");
+
+    // Simulate the window between the route's pre-check and its UPDATE: another account takes the
+    // address, so the pre-check must read "free" while the real write still hits the index.
+    const real = testDb.d1 as unknown as { prepare(sql: string): unknown };
+    const racing = {
+      prepare(sql: string) {
+        if (/^SELECT id FROM users WHERE email/.test(sql)) {
+          return { bind: () => ({ first: async () => null }) };
+        }
+        return real.prepare(sql);
+      },
+    };
+    testDb = { ...testDb, d1: racing as unknown as D1Database };
+
+    const r = await setEmail(bob, { email: "shared@example.com" });
+    expect(r.status).toBe(409);
+    expect(r.json.error.code).toBe("CONFLICT");
+    expect(r.json.error.message).toBe("Email này đã được dùng cho tài khoản khác.");
   });
 });

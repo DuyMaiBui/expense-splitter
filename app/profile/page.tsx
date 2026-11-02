@@ -118,7 +118,8 @@ export default function ProfilePage() {
               <span>Email khôi phục</span>
             </h2>
             <p className="muted">
-              Địa chỉ này dùng để đặt lại mật khẩu khi bạn quên. Chỉ bạn xem và thay đổi được.
+              Địa chỉ này dùng để đặt lại mật khẩu khi bạn quên. Mỗi địa chỉ chỉ dùng được cho một
+              tài khoản.
             </p>
 
             {user.role === "admin" ? (

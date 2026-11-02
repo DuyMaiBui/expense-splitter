@@ -15,7 +15,8 @@ export type UserRole = "user" | "admin";
  *
  * `email` is the caller's OWN recovery address, normalised (trimmed, lowercased) or null when
  * unset. It is edited only through PUT /api/profile/email and is the recovery channel for a
- * forgotten password. `User` is only ever returned for the caller, so it needs no redaction.
+ * forgotten password. One address belongs to at most one account (a second account asking for it
+ * gets 409 CONFLICT). `User` is only ever returned for the caller, so it needs no redaction.
  */
 export interface User {
   id: string;
