@@ -146,8 +146,8 @@ export default function ProfilePage() {
               <span>Mật khẩu</span>
             </h2>
             <p className="muted">
-              Đổi mật khẩu của chính bạn. Mật khẩu mới chỉ gồm chữ số; đổi xong các thiết bị khác
-              sẽ bị đăng xuất.
+              Đổi mật khẩu của chính bạn. Mật khẩu mới có ít nhất 6 ký tự, tối đa 128 ký tự; đổi
+              xong các thiết bị khác sẽ bị đăng xuất, thiết bị này vẫn đăng nhập.
             </p>
             <Link className="btn btn-ghost self-start" href="/change-password" prefetch={false}>
               <Icon name="key" />
