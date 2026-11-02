@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_FROM } from "./env";
+import { DEFAULT_FROM, readEmailEnv } from "./env";
 import { NoOpEmailSender, ResendEmailSender, getEmailSender, getEmailSenderDetails } from "./email";
 
 /**
@@ -44,6 +44,45 @@ describe("getEmailSenderDetails", () => {
 
   it("getEmailSender is the details call without the provider name", () => {
     expect(getEmailSender({})).toBeInstanceOf(NoOpEmailSender);
+  });
+});
+
+describe("readEmailEnv", () => {
+  const saved = { ...process.env };
+
+  afterEach(() => {
+    for (const name of ["EMAIL_PROVIDER", "EMAIL_API_KEY", "EMAIL_FROM", "RESEND_API_KEY"]) {
+      if (saved[name] === undefined) delete process.env[name];
+      else process.env[name] = saved[name];
+    }
+  });
+
+  it("resolves nothing when no binding is set", () => {
+    for (const name of ["EMAIL_PROVIDER", "EMAIL_API_KEY", "EMAIL_FROM", "RESEND_API_KEY"]) {
+      delete process.env[name];
+    }
+    expect(readEmailEnv()).toEqual({
+      EMAIL_PROVIDER: undefined,
+      EMAIL_API_KEY: undefined,
+      EMAIL_FROM: undefined,
+    });
+  });
+
+  it("treats RESEND_API_KEY alone as a configured Resend sender", () => {
+    for (const name of ["EMAIL_PROVIDER", "EMAIL_API_KEY", "EMAIL_FROM"]) delete process.env[name];
+    process.env.RESEND_API_KEY = "re_abc";
+
+    // The operator sets the key named after the provider; there is nothing left to infer.
+    expect(readEmailEnv()).toMatchObject({ EMAIL_PROVIDER: "resend", EMAIL_API_KEY: "re_abc" });
+    expect(getEmailSenderDetails(readEmailEnv()).provider).toBe("resend");
+  });
+
+  it("ignores blank bindings instead of building a sender from them", () => {
+    process.env.EMAIL_PROVIDER = "   ";
+    process.env.EMAIL_API_KEY = "";
+    delete process.env.RESEND_API_KEY;
+
+    expect(getEmailSenderDetails(readEmailEnv()).provider).toBeNull();
   });
 });
 

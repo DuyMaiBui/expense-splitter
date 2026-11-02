@@ -8,6 +8,8 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
  *   EMAIL_PROVIDER  — plain var, "resend" selects the Resend sender; anything else, or unset,
  *                     yields the NoOp sender.
  *   EMAIL_API_KEY   — SECRET (`wrangler secret put EMAIL_API_KEY`), never a plain var.
+ *                     `RESEND_API_KEY` is accepted as an alias, and setting it alone also selects
+ *                     the Resend sender: a key named after the provider leaves nothing to infer.
  *   EMAIL_FROM      — plain var, the verified sender, e.g. "Chia tiền nhóm <no-reply@example.com>".
  *
  * Reading is defensive on purpose: this module is imported by the always-200 forgot-password
@@ -20,6 +22,7 @@ export interface EmailEnv {
   EMAIL_API_KEY?: string;
   EMAIL_FROM?: string;
 }
+
 
 /** Resend's shared test sender, used only when EMAIL_FROM is unset. */
 export const DEFAULT_FROM = "Chia tiền nhóm <onboarding@resend.dev>";
@@ -48,9 +51,17 @@ export function readEmailEnv(): EmailEnv {
     // Outside a Cloudflare request (tests, build, plain Node): fall back below.
   }
 
+  function read(name: string): string | undefined {
+    return optionalString(bindings[name]) ?? optionalString(process.env[name]);
+  }
+
+  const resendKey = read("RESEND_API_KEY");
+  const apiKey = read("EMAIL_API_KEY") ?? resendKey;
+
   return {
-    EMAIL_PROVIDER: optionalString(bindings.EMAIL_PROVIDER) ?? optionalString(process.env.EMAIL_PROVIDER),
-    EMAIL_API_KEY: optionalString(bindings.EMAIL_API_KEY) ?? optionalString(process.env.EMAIL_API_KEY),
-    EMAIL_FROM: optionalString(bindings.EMAIL_FROM) ?? optionalString(process.env.EMAIL_FROM),
+    // A key named after the provider selects it: setting RESEND_API_KEY alone must be enough.
+    EMAIL_PROVIDER: read("EMAIL_PROVIDER") ?? (resendKey ? "resend" : undefined),
+    EMAIL_API_KEY: apiKey,
+    EMAIL_FROM: read("EMAIL_FROM"),
   };
 }
