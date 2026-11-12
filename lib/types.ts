@@ -322,7 +322,7 @@ export interface LedgerEntry {
   expenseId: string;
   kind: ExpenseKind;
   title: string;
-  /** ISO UTC, as stored. Display only: entries are ordered by `createdAt` (entry time), never by this. */
+  /** ISO UTC, as stored. Also the primary ordering key: entries run by spentAt, then createdAt, then expenseId. */
   spentAt: string;
   paidByMemberId: string;
   paidByName: string;

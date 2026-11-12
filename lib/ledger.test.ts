@@ -36,29 +36,38 @@ function rowsFromDeltas(deltas: number[]): LedgerRow[] {
 }
 
 describe("buildLedgerEntries: ordering", () => {
-  it("orders by createdAt (entry time), not spentAt", () => {
-    // "early" was entered first but is dated last; it must still come first.
+  it("orders by spentAt (the spend date), not by entry time", () => {
+    // "dated-first" was entered last but spent first; it must still come first.
     const rows = [
-      row({ expenseId: "late", spentAt: "2026-01-01T00:00:00.000Z", createdAt: "2026-03-01T00:00:00.000Z" }),
-      row({ expenseId: "early", spentAt: "2026-02-01T00:00:00.000Z", createdAt: "2026-01-10T00:00:00.000Z" }),
+      row({ expenseId: "dated-second", spentAt: "2026-02-01T00:00:00.000Z", createdAt: "2026-01-10T00:00:00.000Z" }),
+      row({ expenseId: "dated-first", spentAt: "2026-01-01T00:00:00.000Z", createdAt: "2026-03-01T00:00:00.000Z" }),
     ];
-    expect(buildLedgerEntries(rows).map((e) => e.expenseId)).toEqual(["early", "late"]);
+    expect(buildLedgerEntries(rows).map((e) => e.expenseId)).toEqual(["dated-first", "dated-second"]);
   });
 
-  it("does not let a back-dated row entered later slide in before an earlier-entered row", () => {
+  it("slots a back-dated row entered later BEFORE an earlier-entered row it predates", () => {
     // Back-dated: spentAt is OLDER than the row entered before it, but createdAt is LATER.
-    // It must appear AFTER the earlier-entered row, so it cannot move a "huề" point already passed.
+    // Sorting by spentAt puts it first, the same as the expenses tab. A back-dated row can
+    // therefore move a "huề" boundary, which is the accepted trade-off.
     const rows = [
       row({ expenseId: "entered-first", spentAt: "2026-02-01T00:00:00.000Z", createdAt: "2026-01-10T00:00:00.000Z" }),
       row({ expenseId: "back-dated", spentAt: "2026-01-05T00:00:00.000Z", createdAt: "2026-01-20T00:00:00.000Z" }),
     ];
-    expect(buildLedgerEntries(rows).map((e) => e.expenseId)).toEqual(["entered-first", "back-dated"]);
+    expect(buildLedgerEntries(rows).map((e) => e.expenseId)).toEqual(["back-dated", "entered-first"]);
   });
 
-  it("breaks a createdAt tie on expenseId, ignoring spentAt", () => {
+  it("breaks a spentAt tie on createdAt (entry time)", () => {
+    const rows = [
+      row({ expenseId: "entered-later", spentAt: "2026-01-05T00:00:00.000Z", createdAt: "2026-01-09T00:00:00.000Z" }),
+      row({ expenseId: "entered-earlier", spentAt: "2026-01-05T00:00:00.000Z", createdAt: "2026-01-08T00:00:00.000Z" }),
+    ];
+    expect(buildLedgerEntries(rows).map((e) => e.expenseId)).toEqual(["entered-earlier", "entered-later"]);
+  });
+
+  it("breaks a spentAt and createdAt tie on expenseId", () => {
     const rows = [
       row({ expenseId: "tieB", spentAt: "2026-01-01T00:00:00.000Z", createdAt: "2026-01-09T00:00:00.000Z" }),
-      row({ expenseId: "tieA", spentAt: "2026-03-01T00:00:00.000Z", createdAt: "2026-01-09T00:00:00.000Z" }),
+      row({ expenseId: "tieA", spentAt: "2026-01-01T00:00:00.000Z", createdAt: "2026-01-09T00:00:00.000Z" }),
     ];
     expect(buildLedgerEntries(rows).map((e) => e.expenseId)).toEqual(["tieA", "tieB"]);
   });

@@ -2760,9 +2760,9 @@ describe("member ledger", () => {
     expect(aliceLedger.totals).toMatchObject({ paymentsOut: 0, paymentsIn: 120000 });
   });
 
-  it("orders by entry time: a back-dated expense entered later comes after", async () => {
+  it("orders by spentAt: a back-dated expense entered later comes before an earlier-dated one", async () => {
     const { alice, gid, aliceM, bobM } = await setup();
-    // The later-entered row carries an EARLIER spentAt: sorting by spentAt would put it first.
+    // Entered first, dated later. Entered second, dated earlier: spentAt puts it first.
     const first = (
       await h.createExpense(alice, gid, {
         title: "Cũ", amount: 1000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
@@ -2779,7 +2779,7 @@ describe("member ledger", () => {
     stampCreated(backdated.id, "2026-03-11T09:00:00.000Z");
 
     const { entries } = (await ledgerOf(alice, gid, aliceM)).json.data.ledger;
-    expect(entries.map((e: Json) => e.expenseId)).toEqual([first.id, backdated.id]);
+    expect(entries.map((e: Json) => e.expenseId)).toEqual([backdated.id, first.id]);
   });
 
   it("marks huề exactly when runningNet returns to 0, and totals equal the settlement balances", async () => {
@@ -2787,16 +2787,19 @@ describe("member ledger", () => {
     const a = (
       await h.createExpense(alice, gid, {
         title: "A", amount: 1000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+        spentAt: "2026-04-01T10:00:00.000Z",
       })
     ).json.data.expense;
     const p = (
       await h.createExpense(bob, gid, {
         title: "Trả", amount: 500, paidByMemberId: bobM, participantMemberIds: [aliceM], kind: "payment",
+        spentAt: "2026-04-02T10:00:00.000Z",
       })
     ).json.data.expense;
     const b = (
       await h.createExpense(alice, gid, {
         title: "B", amount: 300, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+        spentAt: "2026-04-03T10:00:00.000Z",
       })
     ).json.data.expense;
     stampCreated(a.id, "2026-04-01T10:00:00.000Z");

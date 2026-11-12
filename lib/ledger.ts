@@ -33,12 +33,18 @@ function compareText(a: string, b: string): number {
 }
 
 /**
- * Ledger order: createdAt asc (the moment the row was ENTERED), then expenseId asc. `spentAt` is
- * deliberately NOT a sort key: a back-dated expense entered later must not slide in before the
- * member's last "huề" and move the zero point.
+ * Ledger order: spentAt asc (the date the spend happened), then createdAt asc, then expenseId asc.
+ * This is the exact mirror of the expenses tab (`EXPENSE_ORDER` in lib/expenses.ts sorts
+ * spent_at DESC, created_at DESC, id DESC), so the ledger and the list agree on which row came
+ * first. Trade-off: a back-dated expense entered later can now sort before the member's last
+ * "huề" and move the cycle boundary, the same as it already does in the expenses tab.
  */
 function compareRows(a: LedgerRow, b: LedgerRow): number {
-  return compareText(a.createdAt, b.createdAt) || compareText(a.expenseId, b.expenseId);
+  return (
+    compareText(a.spentAt, b.spentAt) ||
+    compareText(a.createdAt, b.createdAt) ||
+    compareText(a.expenseId, b.expenseId)
+  );
 }
 
 /**
