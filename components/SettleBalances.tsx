@@ -1,16 +1,31 @@
 import { Icon } from "@/components/Icon";
-import { type LedgerState, MemberLedgerPanel, signedVnd } from "@/components/MemberLedgerPanel";
+import {
+  type LedgerState,
+  type MemberView,
+  MemberLedgerPanel,
+  MemberViewToggle,
+  signedVnd,
+} from "@/components/MemberLedgerPanel";
+import { Modal } from "@/components/Modal";
+import { type PairsState, PairStatementPanel } from "@/components/PairStatementPanel";
 import { formatVnd } from "@/lib/format";
 import type { Balance, LedgerTotals } from "@/lib/types";
 
 interface SettleBalancesProps {
   balances: Balance[];
-  /** Member ids whose ledger row is open. */
-  openIds: ReadonlySet<string>;
+  /** The member whose dialog is open, or null. At most one dialog is open at a time. */
+  openMemberId: string | null;
+  /** Which view the open dialog shows. The page sets it: "Vì sao?" opens the pair view. */
+  openView: MemberView;
   /** Per-member ledger state held by the page; a missing entry means "not fetched yet". */
   ledgers: Readonly<Record<string, LedgerState>>;
-  onToggle: (memberId: string) => void;
+  /** Per-member pair statements held by the page; a missing entry means "not fetched yet". */
+  pairs: Readonly<Record<string, PairsState>>;
+  onOpen: (memberId: string, view: MemberView) => void;
+  onViewChange: (view: MemberView) => void;
+  onClose: () => void;
   onRetry: (memberId: string) => void;
+  onRetryPairs: (memberId: string) => void;
 }
 
 /** Sums every member's split, so the group-wide totals sit above the per-member rows. */
@@ -29,16 +44,23 @@ function groupTotalsOf(balances: Balance[]): LedgerTotals {
 
 /**
  * The "Chi tiết từng người" card: the group summary, then one row per member with the net,
- * the spending and debt-transfer split, and a toggle that opens that member's ledger.
+ * the spending and debt-transfer split, and a button that opens that member's ledger in a dialog
+ * over the page. The dialog is rendered once, here, so only one can be open.
  */
 export function SettleBalances({
   balances,
-  openIds,
+  openMemberId,
+  openView,
   ledgers,
-  onToggle,
+  pairs,
+  onOpen,
+  onViewChange,
+  onClose,
   onRetry,
+  onRetryPairs,
 }: SettleBalancesProps) {
   const group = groupTotalsOf(balances);
+  const openBalance = balances.find((b) => b.memberId === openMemberId);
 
   return (
     <section className="card stack">
@@ -75,8 +97,6 @@ export function SettleBalances({
         <p className="empty">Nhóm chưa có ai.</p>
       ) : (
         balances.map((b) => {
-          const isOpen = openIds.has(b.memberId);
-          const panelId = `member-ledger-${b.memberId}`;
           return (
             <div key={b.memberId} className="stack balance-row">
               <div className="row row-between row-nowrap">
@@ -115,25 +135,40 @@ export function SettleBalances({
               <button
                 type="button"
                 className="btn btn-ghost"
-                aria-expanded={isOpen}
-                aria-controls={isOpen ? panelId : undefined}
-                onClick={() => onToggle(b.memberId)}
+                aria-haspopup="dialog"
+                onClick={() => onOpen(b.memberId, "ledger")}
               >
                 <Icon name="receipt" />
                 <span>Xem từng lần chi/nhận</span>
               </button>
-              {isOpen && (
-                <MemberLedgerPanel
-                  id={panelId}
-                  balance={b}
-                  state={ledgers[b.memberId]}
-                  onRetry={() => onRetry(b.memberId)}
-                />
-              )}
             </div>
           );
         })
       )}
+      <Modal
+        open={openBalance !== undefined}
+        title={openBalance?.name ?? ""}
+        subtitle={openView === "pairs" ? "Đối chiếu từng người" : "Từng lần chi và nhận"}
+        onClose={onClose}
+      >
+        {openBalance && (
+          <div className="stack">
+            <MemberViewToggle view={openView} onChange={onViewChange} />
+            {openView === "pairs" ? (
+              <PairStatementPanel
+                state={pairs[openBalance.memberId]}
+                onRetry={() => onRetryPairs(openBalance.memberId)}
+              />
+            ) : (
+              <MemberLedgerPanel
+                balance={openBalance}
+                state={ledgers[openBalance.memberId]}
+                onRetry={() => onRetry(openBalance.memberId)}
+              />
+            )}
+          </div>
+        )}
+      </Modal>
     </section>
   );
 }

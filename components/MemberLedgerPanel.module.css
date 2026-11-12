@@ -1,16 +1,13 @@
-/* The per-member ledger, opened under a settlement row. Mobile first: every block stacks, and the
-   facts grid is two columns, which still fits 375px. Colours come from the global variables so
-   dark mode follows the rest of the app. */
+/* The per-member ledger, shown in the member ledger dialog (Modal). The dialog supplies the frame
+   and the scrolling body, so this is only the content stack. Mobile first: every block stacks,
+   and the facts grid is two columns, which still fits 375px. Colours come from the global
+   variables so dark mode follows the rest of the app. */
 
 .panel {
   display: flex;
   flex-direction: column;
   gap: var(--gap);
   min-width: 0;
-  padding: var(--gap);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
 }
 
 .heading {
