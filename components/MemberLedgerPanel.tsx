@@ -19,8 +19,6 @@ export type LedgerState =
 type LedgerView = "cycle" | "all";
 
 interface MemberLedgerPanelProps {
-  /** DOM id, referenced by the row button's aria-controls. */
-  id: string;
   /** The settlement row's balance: the flow chart is built from it, so it matches the headline. */
   balance: Balance;
   state: LedgerState | undefined;
@@ -36,6 +34,28 @@ export function signedVnd(amount: number): string {
     return `−${formatVnd(-amount)}`;
   }
   return formatVnd(0);
+}
+
+/** The two views of the member dialog: the per-row history, or the per-counterparty statement. */
+export type MemberView = "ledger" | "pairs";
+
+interface MemberViewToggleProps {
+  view: MemberView;
+  onChange: (view: MemberView) => void;
+}
+
+/** The two-option switch at the top of the member dialog. Same segment styling as the scope toggle. */
+export function MemberViewToggle({ view, onChange }: MemberViewToggleProps) {
+  return (
+    <div className={styles.segment} role="group" aria-label="Chế độ xem">
+      <button type="button" aria-pressed={view === "ledger"} onClick={() => onChange("ledger")}>
+        Từng lần chi/nhận
+      </button>
+      <button type="button" aria-pressed={view === "pairs"} onClick={() => onChange("pairs")}>
+        Đối chiếu từng người
+      </button>
+    </div>
+  );
 }
 
 function kindLabel(entry: LedgerEntry): string {
@@ -56,18 +76,18 @@ function toneClass(delta: number): string {
 }
 
 /**
- * Everything one member spent and received, opened under their settlement row. The flow chart
+ * Everything one member spent and received, shown in the member ledger dialog. The flow chart
  * always covers the whole history (it is the balance split); the waterfall and the list follow
  * the toggle: since the last "huề" (default) or the full history.
  *
  * Presentational: the page owns fetching and caching, and passes the loaded state down.
  */
-export function MemberLedgerPanel({ id, balance, state, onRetry }: MemberLedgerPanelProps) {
+export function MemberLedgerPanel({ balance, state, onRetry }: MemberLedgerPanelProps) {
   const [view, setView] = useState<LedgerView>("cycle");
 
   if (state === undefined || state.status === "loading") {
     return (
-      <div id={id} className={styles.panel}>
+      <div className={styles.panel}>
         <p className="meta" role="status">
           Đang tải lịch sử…
         </p>
@@ -77,7 +97,7 @@ export function MemberLedgerPanel({ id, balance, state, onRetry }: MemberLedgerP
 
   if (state.status === "error") {
     return (
-      <div id={id} className={styles.panel}>
+      <div className={styles.panel}>
         <p className="error" role="alert">
           {state.message}
         </p>
@@ -91,7 +111,7 @@ export function MemberLedgerPanel({ id, balance, state, onRetry }: MemberLedgerP
   const { ledger } = state;
   if (ledger.entries.length === 0) {
     return (
-      <div id={id} className={styles.panel}>
+      <div className={styles.panel}>
         <p className="empty">Chưa có lần chi hoặc nhận nào.</p>
       </div>
     );
@@ -126,7 +146,7 @@ export function MemberLedgerPanel({ id, balance, state, onRetry }: MemberLedgerP
     : "Diễn biến toàn bộ lịch sử";
 
   return (
-    <div id={id} className={styles.panel}>
+    <div className={styles.panel}>
       <div className={styles.flow}>
         <h3 className={styles.heading}>Dòng tiền từ đầu nhóm</h3>
         <MemberFlowChart totals={totals} />

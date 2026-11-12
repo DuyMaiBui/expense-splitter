@@ -5,12 +5,21 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Icon, IconButton } from "@/components/Icon";
-import { SettleBalances } from "@/components/SettleBalances";
-import { type LedgerState } from "@/components/MemberLedgerPanel";
+import { type LedgerState, type MemberView } from "@/components/MemberLedgerPanel";
 import { PaymentQrDialog } from "@/components/PaymentQrDialog";
+import { type PairsState } from "@/components/PairStatementPanel";
+import { SettleBalances } from "@/components/SettleBalances";
+import { transferExplanation } from "@/components/pair-text";
 import { api, invalidateApiCache } from "@/lib/api-client";
 import { formatVnd } from "@/lib/format";
-import type { Balance, Member, MemberLedger, Transfer, Viewer } from "@/lib/types";
+import type {
+  Balance,
+  Member,
+  MemberLedger,
+  PairStatement,
+  Transfer,
+  Viewer,
+} from "@/lib/types";
 
 interface Settlement {
   balances: Balance[];
@@ -21,6 +30,12 @@ interface Settlement {
 }
 
 const LEDGER_ERROR = "Không tải được lịch sử giao dịch. Vui lòng thử lại.";
+const PAIRS_ERROR = "Không tải được đối chiếu. Vui lòng thử lại.";
+
+/** The pairs endpoint wraps its list with the viewer, which this page does not read. */
+interface PairsResponse {
+  pairs: PairStatement[];
+}
 
 export default function SettlePage() {
   const { groupId } = useParams<{ groupId: string }>();
@@ -33,10 +48,16 @@ export default function SettlePage() {
   // The row the dialog is open for. Recording the payment happens inside that dialog now, so
   // there is no "start at the confirm step" variant to carry alongside it.
   const [selected, setSelected] = useState<Transfer | null>(null);
-  // Per-member ledgers: fetched the first time a row opens, then kept until a refresh or payment.
+  // Per-member ledgers: fetched the first time a member's dialog opens, then kept until a refresh
+  // or payment.
   const [ledgers, setLedgers] = useState<Record<string, LedgerState>>({});
-  const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set());
-  // Bumped whenever the cache is cleared, so a response still in flight from before is dropped.
+  // The member whose dialog is open. One value, so only one dialog can be open.
+  const [openMemberId, setOpenMemberId] = useState<string | null>(null);
+  // Which view that dialog shows: the per-row ledger, or the per-counterparty pair statement.
+  const [dialogView, setDialogView] = useState<MemberView>("ledger");
+  // Per-member pair statements, fetched the first time the pair view opens for that member.
+  const [pairs, setPairs] = useState<Record<string, PairsState>>({});
+  // Bumped whenever the caches are cleared, so a response still in flight from before is dropped.
   const ledgerEpoch = useRef(0);
 
   const load = useCallback(
@@ -80,31 +101,55 @@ export default function SettlePage() {
     [groupId],
   );
 
-  // Fetch each open row's ledger exactly once: a missing entry is the only trigger, and the
-  // "loading" entry written by loadLedger stops a second request for the same member.
+  // Fetch the open member's ledger exactly once: a missing entry is the only trigger, and the
+  // "loading" entry written by loadLedger stops a second request for the same member. After a
+  // refresh or payment the cache is empty again, so the still-open member is re-read here.
   useEffect(() => {
-    for (const memberId of openIds) {
-      if (ledgers[memberId] === undefined) {
-        void loadLedger(memberId);
-      }
+    if (openMemberId !== null && dialogView === "ledger" && ledgers[openMemberId] === undefined) {
+      void loadLedger(openMemberId);
     }
-  }, [openIds, ledgers, loadLedger]);
+  }, [openMemberId, dialogView, ledgers, loadLedger]);
 
-  function toggleLedger(memberId: string): void {
-    setOpenIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(memberId)) {
-        next.delete(memberId);
-      } else {
-        next.add(memberId);
+  const loadPairs = useCallback(
+    async (memberId: string) => {
+      const epoch = ledgerEpoch.current;
+      setPairs((prev) => ({ ...prev, [memberId]: { status: "loading" } }));
+      try {
+        const { pairs: statements } = await api<PairsResponse>(
+          `/api/groups/${groupId}/members/${memberId}/pairs`,
+        );
+        if (epoch === ledgerEpoch.current) {
+          setPairs((prev) => ({
+            ...prev,
+            [memberId]: { status: "ready", statements },
+          }));
+        }
+      } catch {
+        if (epoch === ledgerEpoch.current) {
+          setPairs((prev) => ({ ...prev, [memberId]: { status: "error", message: PAIRS_ERROR } }));
+        }
       }
-      return next;
-    });
+    },
+    [groupId],
+  );
+
+  // Same once-per-member rule as the ledger, for the pair view.
+  useEffect(() => {
+    if (openMemberId !== null && dialogView === "pairs" && pairs[openMemberId] === undefined) {
+      void loadPairs(openMemberId);
+    }
+  }, [openMemberId, dialogView, pairs, loadPairs]);
+
+  // Opens one member's dialog on the given view. "Vì sao?" asks for the pair view directly.
+  function openDialog(memberId: string, view: MemberView): void {
+    setOpenMemberId(memberId);
+    setDialogView(view);
   }
 
   function resetLedgers(): void {
     ledgerEpoch.current += 1;
     setLedgers({});
+    setPairs({});
   }
 
   const nameOf = (id: string) => data?.balances.find((b) => b.memberId === id)?.name ?? "?";
@@ -157,6 +202,7 @@ export default function SettlePage() {
                 // Only the member who has to transfer gets the button; everyone else reads the
                 // row alone.
                 const debtor = data.viewer.memberId === t.fromMemberId;
+                const why = transferExplanation(t, nameOf(t.fromMemberId), nameOf(t.toMemberId));
                 return (
                   <div key={`${t.fromMemberId}-${t.toMemberId}`} className="stack transfer-row">
                     <div className="row row-between row-nowrap">
@@ -167,6 +213,18 @@ export default function SettlePage() {
                       </span>
                       <strong className="amount">{formatVnd(t.amount)}</strong>
                     </div>
+                    <div className="row row-nowrap">
+                      <span className="badge">{why.badge}</span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        aria-haspopup="dialog"
+                        onClick={() => openDialog(t.fromMemberId, "pairs")}
+                      >
+                        <span>Vì sao?</span>
+                      </button>
+                    </div>
+                    <span className="meta">{why.sentence}</span>
                     {/* Only the person who owes the money gets a button: the QR and the payment
                         confirmation both live in the dialog, in the order they do them. */}
                     {debtor && (
@@ -187,14 +245,26 @@ export default function SettlePage() {
                 );
               })
             )}
+            {data.transfers.length > 0 && (
+              <p className="meta">
+                <strong>Trả đúng người đã chi</strong>: trả thẳng cho người đã ứng tiền cho bạn.{" "}
+                <strong>Bù trừ</strong>: không nợ trực tiếp người nhận, khoản này chỉ để cả nhóm về
+                0.
+              </p>
+            )}
           </section>
 
           <SettleBalances
             balances={data.balances}
-            openIds={openIds}
+            openMemberId={openMemberId}
+            openView={dialogView}
             ledgers={ledgers}
-            onToggle={toggleLedger}
+            pairs={pairs}
+            onOpen={openDialog}
+            onViewChange={setDialogView}
+            onClose={() => setOpenMemberId(null)}
             onRetry={(memberId) => void loadLedger(memberId)}
+            onRetryPairs={(memberId) => void loadPairs(memberId)}
           />
         </>
       )}

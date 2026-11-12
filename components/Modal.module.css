@@ -1,0 +1,91 @@
+/* The generic dialog shell (components/Modal.tsx). Mobile first: a near full-screen sheet with the
+   header pinned and only the body scrolling. From 641px it becomes a centred card, up to 720px
+   wide and at most 90% of the viewport tall. Colours come from the global variables, so dark mode
+   follows the rest of the app. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 720px;
+  min-width: 0;
+  /* A plain height, not auto: the sheet fills the phone screen, the header stays on top and the
+     body takes the rest. dvh tracks the mobile browser toolbar; vh is the fallback. */
+  height: calc(100vh - 16px);
+  height: calc(100dvh - 16px);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+
+/* Focus lands on the container for a screen reader, not as a visible ring. */
+.sheet:focus {
+  outline: none;
+}
+
+/* Pinned: it is a flex row outside the scrolling body, so it never moves. */
+.head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 12px 8px 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* The only scrolling band: the page behind is locked while the dialog is open. */
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+}
+
+@media (min-width: 641px) {
+  .backdrop {
+    align-items: center;
+    padding: 24px;
+  }
+
+  .sheet {
+    height: auto;
+    max-height: 90vh;
+    max-height: 90dvh;
+  }
+}

@@ -2,8 +2,9 @@ import { requireGroupMember, requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { buildViewer, listMembers } from "@/lib/group-queries";
 import { ok, route } from "@/lib/http";
-import { computeTransfers, toBalances, type MemberTotals } from "@/lib/settle";
-import type { ExpenseKind } from "@/lib/types";
+import { directDebts, planTransfers } from "@/lib/pairs";
+import { toBalances, type MemberTotals } from "@/lib/settle";
+import type { ExpenseKind, PairRow } from "@/lib/types";
 
 /** One grouped row: the amount summed for one member, one kind. Used by both grouped statements. */
 interface KindSumRow {
@@ -14,6 +15,13 @@ interface KindSumRow {
 
 interface TotalRow {
   total: number;
+}
+
+/** One grouped row of the pair statement: `debtor` owes `payer` `amount` before netting. */
+interface PairSumRow {
+  payer: string;
+  debtor: string;
+  amount: number;
 }
 
 /** The four per-member numbers. paid = spentPaid + paymentsOut; owed = spentOwed + paymentsIn. */
@@ -33,12 +41,12 @@ export const GET = route(async (_req, ctx) => {
 
   const db = getDb();
 
-  // Aggregates are computed in SQL so the read stays three grouped scans however many
-  // expenses the group has accumulated. Two D1 round trips total (members + one three-statement
-  // batch), run in parallel. Every query is scoped to group_id and skips soft-deleted rows.
-  const [members, [paidResult, owedResult, spentResult]] = await Promise.all([
+  // Aggregates are computed in SQL so the read stays four grouped scans however many expenses the
+  // group has accumulated. Two D1 round trips total (members + one four-statement batch), run in
+  // parallel. Every query is scoped to group_id and skips soft-deleted rows.
+  const [members, [paidResult, owedResult, spentResult, pairResult]] = await Promise.all([
     listMembers(db, groupId),
-    db.batch<KindSumRow | TotalRow>([
+    db.batch<KindSumRow | TotalRow | PairSumRow>([
       // Grouped by kind so a payment's amount is kept apart from a shared cost's.
       db
         .prepare(
@@ -63,6 +71,16 @@ export const GET = route(async (_req, ctx) => {
           `SELECT SUM(amount) AS total
            FROM expenses
            WHERE group_id = ? AND deleted_at IS NULL AND kind = 'expense'`,
+        )
+        .bind(groupId),
+      // Who owes whom directly, kind-agnostic: a payment is an ordinary row, so it nets too.
+      db
+        .prepare(
+          `SELECT e.paid_by_member_id AS payer, es.member_id AS debtor, SUM(es.amount) AS amount
+           FROM expenses e
+           JOIN expense_shares es ON es.expense_id = e.id
+           WHERE e.group_id = ? AND e.deleted_at IS NULL AND es.member_id <> e.paid_by_member_id
+           GROUP BY e.paid_by_member_id, es.member_id`,
         )
         .bind(groupId),
     ]),
@@ -107,7 +125,12 @@ export const GET = route(async (_req, ctx) => {
     .filter((t) => !t.removed || t.paid !== 0 || t.owed !== 0);
 
   const balances = toBalances(totals);
-  const transfers = computeTransfers(balances);
+  const pairRows: PairRow[] = ((pairResult?.results ?? []) as PairSumRow[]).map((row) => ({
+    payerId: row.payer,
+    debtorId: row.debtor,
+    amount: row.amount,
+  }));
+  const transfers = planTransfers(balances, directDebts(pairRows));
   // SUM() over no rows is NULL; a group with no expense (or only payments) spent nothing.
   const totalSpent = (spentResult?.results?.[0] as TotalRow | undefined)?.total ?? 0;
 
