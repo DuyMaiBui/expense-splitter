@@ -42,6 +42,7 @@ import { PUT as adminGroupPUT } from "@/app/api/admin/groups/[groupId]/route";
 import { POST as adminGroupDeletePOST } from "@/app/api/admin/groups/[groupId]/delete/route";
 import { POST as adminGroupRestorePOST } from "@/app/api/admin/groups/[groupId]/restore/route";
 import { GET as settlementGET } from "@/app/api/groups/[groupId]/settlement/route";
+import { GET as ledgerGET } from "@/app/api/groups/[groupId]/members/[memberId]/ledger/route";
 import { GET as statsGET } from "@/app/api/groups/[groupId]/stats/route";
 import { POST as joinPOST } from "@/app/api/groups/join/route";
 import { GET as groupsGET, POST as groupsPOST } from "@/app/api/groups/route";
@@ -2704,6 +2705,197 @@ describe("permissions: member removal", () => {
     // Removed already: still 404, for a caller who could have removed them and for one who could not.
     expect((await h.removeMember(w.alice, w.gid, w.daveM)).status).toBe(404);
     expect((await h.removeMember(w.bob, w.gid, w.daveM)).status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------- member ledger
+
+describe("member ledger", () => {
+  const ledgerOf = (c: Client, groupId: string, memberId: string) =>
+    call(c, ledgerGET, { params: { groupId, memberId } });
+
+  /** Pins an expense's entry time, so ordering never depends on same-millisecond inserts. */
+  const stampCreated = (expenseId: string, iso: string) =>
+    testDb.raw.prepare("UPDATE expenses SET created_at = ? WHERE id = ?").run(iso, expenseId);
+
+  it("is one entry when the member both paid and shares the expense", async () => {
+    const { alice, gid, aliceM, bobM, chiM } = await setup();
+    await h.createExpense(alice, gid, {
+      title: "Khách sạn", amount: 90000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM, chiM],
+    });
+
+    const res = await ledgerOf(alice, gid, aliceM);
+    expect(res.status).toBe(200);
+    const { entries, totals } = res.json.data.ledger;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: "expense", title: "Khách sạn", paidByMemberId: aliceM, paidByName: "Alice",
+      paid: 90000, share: 30000, delta: 60000, runningNet: 60000, settledAfter: false,
+      counterpartyMemberId: null, counterpartyName: null,
+    });
+    expect(totals).toEqual({ spentPaid: 90000, spentOwed: 30000, paymentsOut: 0, paymentsIn: 0, net: 60000 });
+  });
+
+  it("names the counterparty of a payment out and of a payment in", async () => {
+    const { alice, bob, gid, aliceM, bobM } = await setup();
+    await h.createExpense(alice, gid, {
+      title: "Ăn tối", amount: 240000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+    });
+    await h.createExpense(bob, gid, {
+      title: "Thanh toán", amount: 120000, paidByMemberId: bobM, participantMemberIds: [aliceM], kind: "payment",
+    });
+
+    const bobLedger = (await ledgerOf(bob, gid, bobM)).json.data.ledger;
+    const out = bobLedger.entries.find((e: Json) => e.kind === "payment");
+    expect(out).toMatchObject({
+      paid: 120000, share: 0, delta: 120000, counterpartyMemberId: aliceM, counterpartyName: "Alice",
+    });
+    expect(bobLedger.totals).toMatchObject({ paymentsOut: 120000, paymentsIn: 0 });
+
+    const aliceLedger = (await ledgerOf(alice, gid, aliceM)).json.data.ledger;
+    const incoming = aliceLedger.entries.find((e: Json) => e.kind === "payment");
+    expect(incoming).toMatchObject({
+      paidByMemberId: bobM, paid: 0, share: 120000, delta: -120000, counterpartyMemberId: bobM, counterpartyName: "Bob",
+    });
+    expect(aliceLedger.totals).toMatchObject({ paymentsOut: 0, paymentsIn: 120000 });
+  });
+
+  it("orders by entry time: a back-dated expense entered later comes after", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    // The later-entered row carries an EARLIER spentAt: sorting by spentAt would put it first.
+    const first = (
+      await h.createExpense(alice, gid, {
+        title: "Cũ", amount: 1000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+        spentAt: "2026-03-10T08:00:00.000Z",
+      })
+    ).json.data.expense;
+    const backdated = (
+      await h.createExpense(alice, gid, {
+        title: "Lùi ngày", amount: 2000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+        spentAt: "2026-01-05T08:00:00.000Z",
+      })
+    ).json.data.expense;
+    stampCreated(first.id, "2026-03-10T09:00:00.000Z");
+    stampCreated(backdated.id, "2026-03-11T09:00:00.000Z");
+
+    const { entries } = (await ledgerOf(alice, gid, aliceM)).json.data.ledger;
+    expect(entries.map((e: Json) => e.expenseId)).toEqual([first.id, backdated.id]);
+  });
+
+  it("marks huề exactly when runningNet returns to 0, and totals equal the settlement balances", async () => {
+    const { alice, bob, gid, aliceM, bobM } = await setup();
+    const a = (
+      await h.createExpense(alice, gid, {
+        title: "A", amount: 1000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+      })
+    ).json.data.expense;
+    const p = (
+      await h.createExpense(bob, gid, {
+        title: "Trả", amount: 500, paidByMemberId: bobM, participantMemberIds: [aliceM], kind: "payment",
+      })
+    ).json.data.expense;
+    const b = (
+      await h.createExpense(alice, gid, {
+        title: "B", amount: 300, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+      })
+    ).json.data.expense;
+    stampCreated(a.id, "2026-04-01T10:00:00.000Z");
+    stampCreated(p.id, "2026-04-02T10:00:00.000Z");
+    stampCreated(b.id, "2026-04-03T10:00:00.000Z");
+
+    const settlement = (await h.settlement(alice, gid)).json.data;
+    const aliceLedger = (await ledgerOf(alice, gid, aliceM)).json.data.ledger;
+    // Alice: +500 after A, 0 after the payment in (huề), +150 after B.
+    expect(aliceLedger.entries.map((e: Json) => e.runningNet)).toEqual([500, 0, 150]);
+    expect(aliceLedger.entries.map((e: Json) => e.settledAfter)).toEqual([false, true, false]);
+
+    for (const [client, memberId] of [[alice, aliceM], [bob, bobM]] as const) {
+      const { ledger } = (await ledgerOf(client, gid, memberId)).json.data;
+      const balance = settlement.balances.find((x: Json) => x.memberId === memberId);
+      expect(ledger.totals).toEqual({
+        spentPaid: balance.spentPaid,
+        spentOwed: balance.spentOwed,
+        paymentsOut: balance.paymentsOut,
+        paymentsIn: balance.paymentsIn,
+        net: balance.net,
+      });
+      expect(ledger.entries.at(-1).runningNet).toBe(ledger.totals.net);
+    }
+  });
+
+  it("leaves soft-deleted expenses out", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    const kept = (
+      await h.createExpense(alice, gid, {
+        title: "Giữ", amount: 1000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+      })
+    ).json.data.expense;
+    const gone = (
+      await h.createExpense(alice, gid, {
+        title: "Xóa", amount: 4000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+      })
+    ).json.data.expense;
+    await h.deleteExpense(alice, gid, gone.id);
+
+    const { entries, totals } = (await ledgerOf(alice, gid, aliceM)).json.data.ledger;
+    expect(entries.map((e: Json) => e.expenseId)).toEqual([kept.id]);
+    expect(totals.spentPaid).toBe(1000);
+  });
+
+  it("still reads a removed member's ledger, flagged removed", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    await h.createExpense(alice, gid, {
+      title: "A", amount: 3000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+    });
+    await h.removeMember(alice, gid, bobM);
+
+    const res = await ledgerOf(alice, gid, bobM);
+    expect(res.status).toBe(200);
+    expect(res.json.data.ledger).toMatchObject({ memberId: bobM, removed: true, totals: { net: -1500 } });
+    expect(res.json.data.ledger.entries).toHaveLength(1);
+  });
+
+  it("never mixes in rows of another group, even for the same user", async () => {
+    const { alice, bob, gid, aliceM, bobM } = await setup();
+    const other = (await h.createGroup(alice, "Nhóm khác")).json.data.group;
+    const aliceInOther = other.myMemberId as string;
+    const bobInOther = (await h.join(bob, other.inviteCode)).json.data.group.myMemberId as string;
+
+    await h.createExpense(alice, gid, {
+      title: "Nhóm 1", amount: 1000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
+    });
+    await h.createExpense(alice, other.id, {
+      title: "Nhóm 2", amount: 9000, paidByMemberId: aliceInOther, participantMemberIds: [aliceInOther, bobInOther],
+    });
+
+    const first = (await ledgerOf(alice, gid, aliceM)).json.data.ledger;
+    expect(first.entries.map((e: Json) => e.title)).toEqual(["Nhóm 1"]);
+    expect(first.totals.spentPaid).toBe(1000);
+
+    const second = (await ledgerOf(alice, other.id, aliceInOther)).json.data.ledger;
+    expect(second.entries.map((e: Json) => e.title)).toEqual(["Nhóm 2"]);
+  });
+
+  it("404 for a member of another group, 401 when signed out, 403 for a non-member", async () => {
+    const { alice, gid, aliceM } = await setup();
+    const other = (await h.createGroup(alice, "Nhóm khác")).json.data.group;
+    const eve = new Client();
+    await h.register(eve, { username: "eve", displayName: "Eve", password: "secret3" });
+
+    const foreign = await ledgerOf(alice, gid, other.myMemberId);
+    expect(foreign.status).toBe(404);
+    expect(foreign.json.error.code).toBe("NOT_FOUND");
+
+    const unknown = await ledgerOf(alice, gid, "00000000-0000-4000-8000-000000000000");
+    expect(unknown.status).toBe(404);
+
+    const anonymous = await ledgerOf(new Client(), gid, aliceM);
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.json.error.code).toBe("UNAUTHORIZED");
+
+    const outsider = await ledgerOf(eve, gid, aliceM);
+    expect(outsider.status).toBe(403);
+    expect(outsider.json.error.code).toBe("FORBIDDEN");
   });
 });
 

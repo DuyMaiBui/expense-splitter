@@ -2,10 +2,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { StatsBucket, StatsMember } from "@/lib/types";
+import type { LedgerEntry, LedgerTotals, StatsBucket, StatsMember } from "@/lib/types";
 
 import { BarChart } from "./BarChart";
 import { DonutChart } from "./DonutChart";
+import { MemberFlowChart } from "./MemberFlowChart";
+import { WaterfallChart } from "./WaterfallChart";
 
 /**
  * A render smoke test for the two charts.
@@ -90,5 +92,120 @@ describe("DonutChart", () => {
 
     expect(html).not.toContain("chart-slice");
     expect(html).toContain("Chưa có chi tiêu trong khoảng này");
+  });
+});
+
+/** Ledger entries whose running balance follows `deltas`, optionally from an opening level. */
+const ledger = (deltas: number[], opening = 0, kinds: LedgerEntry["kind"][] = []): LedgerEntry[] => {
+  let running = opening;
+  return deltas.map((delta, index) => {
+    running += delta;
+    const kind = kinds[index] ?? "expense";
+    return {
+      expenseId: `e${index}`,
+      kind,
+      title: `Khoản ${index + 1}`,
+      spentAt: "2026-11-01T03:00:00.000Z",
+      paidByMemberId: "m1",
+      paidByName: "An",
+      paid: Math.max(0, delta),
+      share: Math.max(0, -delta),
+      delta,
+      runningNet: running,
+      settledAfter: running === 0,
+      counterpartyMemberId: kind === "payment" ? "m2" : null,
+      counterpartyName: kind === "payment" ? "Bình" : null,
+    };
+  });
+};
+
+describe("MemberFlowChart", () => {
+  const totals = (overrides: Partial<LedgerTotals>): LedgerTotals => ({
+    spentPaid: 0,
+    spentOwed: 0,
+    paymentsOut: 0,
+    paymentsIn: 0,
+    net: 0,
+    ...overrides,
+  });
+
+  it("shows the four labelled values with their full amounts and a gain sentence", () => {
+    const html = renderToStaticMarkup(
+      createElement(MemberFlowChart, {
+        totals: totals({ spentPaid: 300_000, spentOwed: 120_000, paymentsOut: 50_000, paymentsIn: 0, net: 130_000 }),
+      }),
+    );
+
+    expect(html).toContain("Đã chi ứng trước");
+    expect(html).toContain("Phần phải chịu");
+    expect(html).toContain("Đã chuyển đi");
+    expect(html).toContain("Đã nhận về");
+    expect(html).toContain("300.000");
+    expect(html).toContain("Cuối cùng được nhận lại 130.000");
+  });
+
+  it("says the owing sentence when the member still has to pay", () => {
+    const html = renderToStaticMarkup(
+      createElement(MemberFlowChart, { totals: totals({ spentPaid: 10_000, spentOwed: 90_000, net: -80_000 }) }),
+    );
+
+    expect(html).toContain("Cuối cùng còn phải trả 80.000");
+  });
+
+  it("says Đã huề when the net is exactly zero", () => {
+    const html = renderToStaticMarkup(createElement(MemberFlowChart, { totals: totals({}) }));
+
+    expect(html).toContain("Đã huề");
+  });
+});
+
+describe("WaterfallChart", () => {
+  it("draws one bar per entry plus the marker, and the summary names the final balance", () => {
+    const entries = ledger([100_000, -250_000, 50_000], 0, ["expense", "payment", "expense"]);
+    const html = renderToStaticMarkup(createElement(WaterfallChart, { entries, title: "Dòng tiền" }));
+
+    expect(html.match(/class="wf-bar /g)?.length).toBe(3);
+    expect(html).toContain("Số dư hiện tại: -100.000đ");
+    expect(html).toContain('aria-label="Dòng tiền: 3 khoản');
+    expect(html).toContain("wf-zero");
+  });
+
+  it("marks transfers as outlined and rising or falling bars with a triangle", () => {
+    const entries = ledger([100_000, -250_000], 0, ["payment", "expense"]);
+    const html = renderToStaticMarkup(createElement(WaterfallChart, { entries, title: "Dòng tiền" }));
+
+    expect(html).toContain("wf-payment");
+    expect(html).toContain("wf-spend");
+    expect(html).toContain("wf-arrow-up");
+    expect(html).toContain("wf-arrow-down");
+  });
+
+  it("shows the Vietnamese empty state and no chart when nothing has happened", () => {
+    const html = renderToStaticMarkup(createElement(WaterfallChart, { entries: [], title: "Dòng tiền" }));
+
+    expect(html).toContain("Chưa có lần chi hoặc nhận nào.");
+    expect(html).not.toContain("wf-plot");
+  });
+
+  it("draws a single entry as a full bar with the marker beside it", () => {
+    const html = renderToStaticMarkup(
+      createElement(WaterfallChart, { entries: ledger([-75_000]), title: "Dòng tiền" }),
+    );
+
+    expect(html.match(/class="wf-bar /g)?.length).toBe(1);
+    expect(html).toContain("Số dư hiện tại: -75.000đ");
+  });
+
+  it("keeps a long list (60 entries) in a scrolling plot rather than shrinking it", () => {
+    const deltas = Array.from({ length: 60 }, (_, index) => (index % 2 === 0 ? 10_000 : -4_000));
+    const html = renderToStaticMarkup(
+      createElement(WaterfallChart, { entries: ledger(deltas), title: "Dòng tiền" }),
+    );
+
+    expect(html.match(/class="wf-bar /g)?.length).toBe(60);
+    expect(html).toContain("wf-scroll");
+    expect(html).toContain("<details");
+    // The full table: one row per entry plus the header row.
+    expect(html.match(/<tr>/g)?.length).toBe(61);
   });
 });
