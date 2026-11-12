@@ -208,20 +208,11 @@ export interface Balance {
   paymentsIn: number;
 }
 
-/**
- * A single settlement payment suggestion. Chosen by `planTransfers` (lib/pairs.ts), in two steps:
- * `basis: "direct"` pays what `fromMemberId` actually owes `toMemberId` (amount <= directDebt);
- * `basis: "offset"` is the leftover netting after every direct payment was exhausted, and its
- * `directDebt` is the pair's full direct debt (0 when there is none). A pair can appear twice, once
- * as "direct" and once as "offset" (the excess beyond the direct debt).
- */
+/** A single settlement payment suggestion. */
 export interface Transfer {
   fromMemberId: string;
   toMemberId: string;
   amount: number;
-  basis: "direct" | "offset";
-  /** `DirectDebt.amount` from `fromMemberId` to `toMemberId`; 0 when `fromMemberId` owes nothing directly. */
-  directDebt: number;
 }
 
 /** The range a spending chart covers: everything, one local year, or one local month. */
@@ -368,97 +359,4 @@ export interface MemberLedger {
   removed: boolean;
   entries: LedgerEntry[];
   totals: LedgerTotals;
-}
-
-/**
- * One aggregate of the group's live rows: `SUM(es.amount)` over rows paid by `payerId` where
- * `debtorId` holds a share, `debtorId != payerId`, kind-agnostic. It means `debtorId` owes `payerId`.
- */
-export interface PairRow {
-  payerId: string;
-  debtorId: string;
-  amount: number;
-}
-
-/**
- * Net direct debt between an ordered pair: `debtorId` owes `creditorId` `amount` after the reverse
- * direction is netted off. Only positive amounts exist (`directDebts` in lib/pairs.ts).
- */
-export interface DirectDebt {
-  debtorId: string;
-  creditorId: string;
-  amount: number;
-}
-
-/**
- * An edit or delete of one expense, as seen from a pair statement. `before*`/`after*` are this
- * member's and the counterparty's shares; `after*` are null for a delete (`afterAmount` too).
- * `afterLaterPayment` is true when the edit happened after money had already moved between the
- * two (a payment event of the pair was entered before `at`).
- */
-export interface PairRevision {
-  at: string;
-  actorName: string;
-  action: "update" | "delete";
-  beforeAmount: number;
-  afterAmount: number | null;
-  beforeMemberShare: number;
-  afterMemberShare: number | null;
-  beforeCounterpartyShare: number;
-  afterCounterpartyShare: number | null;
-  afterLaterPayment: boolean;
-}
-
-/**
- * One live row between a member M and a counterparty P, seen from M. `delta` is the change in what P
- * owes M: `+counterpartyShare` when M paid the row, `-memberShare` when P paid it. `runningNet`
- * accumulates `delta` in createdAt asc, then expenseId asc order.
- */
-export interface PairEvent {
-  expenseId: string;
-  kind: ExpenseKind;
-  title: string;
-  spentAt: string;
-  createdAt: string;
-  paidByMemberId: string;
-  paidByName: string;
-  memberShare: number;
-  counterpartyShare: number;
-  delta: number;
-  runningNet: number;
-  revisions: PairRevision[];
-}
-
-/**
- * The statement between a member M and one counterparty P. `net = sum(delta)`: net > 0 means P owes
- * M, net < 0 means M owes P. `removed` is the counterparty's removal flag.
- */
-export interface PairStatement {
-  counterpartyMemberId: string;
-  counterpartyName: string;
-  removed: boolean;
-  net: number;
-  events: PairEvent[];
-  /**
-   * Edits and deletes that touched a row between the pair but are NOT a live event of it now (the
-   * expense was deleted, or edited so it no longer involves the pair), ordered by `at` asc. Same
-   * `afterLaterPayment` rule as `PairRevision`.
-   */
-  removedRevisions: PairRemovedRevision[];
-}
-
-/** A revision of an expense that is not (or no longer) a live event of the pair; see `PairStatement`. */
-export interface PairRemovedRevision {
-  expenseId: string;
-  title: string;
-  at: string;
-  actorName: string;
-  action: "update" | "delete";
-  beforeAmount: number;
-  afterAmount: number | null;
-  beforeMemberShare: number;
-  afterMemberShare: number | null;
-  beforeCounterpartyShare: number;
-  afterCounterpartyShare: number | null;
-  afterLaterPayment: boolean;
 }

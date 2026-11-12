@@ -43,7 +43,6 @@ import { POST as adminGroupDeletePOST } from "@/app/api/admin/groups/[groupId]/d
 import { POST as adminGroupRestorePOST } from "@/app/api/admin/groups/[groupId]/restore/route";
 import { GET as settlementGET } from "@/app/api/groups/[groupId]/settlement/route";
 import { GET as ledgerGET } from "@/app/api/groups/[groupId]/members/[memberId]/ledger/route";
-import { GET as pairsGET } from "@/app/api/groups/[groupId]/members/[memberId]/pairs/route";
 import { GET as statsGET } from "@/app/api/groups/[groupId]/stats/route";
 import { POST as joinPOST } from "@/app/api/groups/join/route";
 import { GET as groupsGET, POST as groupsPOST } from "@/app/api/groups/route";
@@ -154,8 +153,6 @@ const h = {
   log: (c: Client, groupId: string, query = "") =>
     call(c, logGET, { params: { groupId }, path: `/api/x${query}` }),
   settlement: (c: Client, groupId: string) => call(c, settlementGET, { params: { groupId } }),
-  pairs: (c: Client, groupId: string, memberId: string) =>
-    call(c, pairsGET, { params: { groupId, memberId } }),
   stats: (c: Client, groupId: string, query = "") =>
     call(c, statsGET, { params: { groupId }, path: `/api/x${query}` }),
   adminUsers: (c: Client) => call(c, adminUsersGET, { path: "/api/admin/users" }),
@@ -821,10 +818,7 @@ describe("settlement", () => {
 
     const r = (await h.settlement(alice, gid)).json.data;
     expect(r.totalSpent).toBe(2000);
-    // Bob's edited share is 1000 and it is his only debt: one direct payment of exactly that.
-    expect(r.transfers).toEqual([
-      { fromMemberId: bobM, toMemberId: aliceM, amount: 1000, basis: "direct", directDebt: 1000 },
-    ]);
+    expect(r.transfers).toEqual([{ fromMemberId: bobM, toMemberId: aliceM, amount: 1000 }]);
   });
 
   it("keeps a removed member who still has a balance, hides one with none", async () => {
@@ -840,10 +834,7 @@ describe("settlement", () => {
     expect(names).toContain("Bob");
     expect(names).not.toContain("Chi");
     expect(r.balances.find((b: Json) => b.name === "Bob")).toMatchObject({ removed: true, net: -1500 });
-    // The removed Bob's 1500 is still owed to Alice directly, so it is paid as a direct debt.
-    expect(r.transfers).toEqual([
-      { fromMemberId: bobM, toMemberId: aliceM, amount: 1500, basis: "direct", directDebt: 1500 },
-    ]);
+    expect(r.transfers).toEqual([{ fromMemberId: bobM, toMemberId: aliceM, amount: 1500 }]);
   });
 
   it("keeps totalSpent on spending only: a recorded payment cancels the transfer without adding to it", async () => {
@@ -854,9 +845,7 @@ describe("settlement", () => {
 
     const before = (await h.settlement(alice, gid)).json.data;
     expect(before.totalSpent).toBe(240000);
-    expect(before.transfers).toEqual([
-      { fromMemberId: bobM, toMemberId: aliceM, amount: 120000, basis: "direct", directDebt: 120000 },
-    ]);
+    expect(before.transfers).toEqual([{ fromMemberId: bobM, toMemberId: aliceM, amount: 120000 }]);
 
     // Bob settles what he owes: the payer is Bob, the single receiver is Alice.
     const paid = await h.createExpense(bob, gid, {
@@ -886,36 +875,7 @@ describe("settlement", () => {
     // Bob paid 50000 to Alice: Alice is 50000 down, Bob 50000 up, Chi untouched, summing to zero.
     expect(net).toEqual({ Alice: -50000, Bob: 50000, Chi: 0 });
     expect(Object.values(net).reduce((a, b) => a + (b as number), 0)).toBe(0);
-    // Alice owes Bob the whole 50000 directly: Bob paid it to Alice's share, so it is a direct debt.
-    expect(r.transfers).toEqual([
-      { fromMemberId: aliceM, toMemberId: bobM, amount: 50000, basis: "direct", directDebt: 50000 },
-    ]);
-  });
-
-  it("pays a debtor's only direct creditor directly, and labels the unavoidable leftover offset", async () => {
-    const { alice, gid, aliceM, bobM, chiM } = await setup();
-    // Bob owes Alice 30000 directly (his only direct debt).
-    await h.createExpense(alice, gid, {
-      title: "Vé", amount: 60000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
-    });
-    // Chi paid 10000 for Alice: Alice owes Chi 10000, so Chi is a second creditor.
-    await h.createExpense(alice, gid, {
-      title: "Cà phê", amount: 10000, paidByMemberId: chiM, participantMemberIds: [aliceM],
-    });
-
-    const r = (await h.settlement(alice, gid)).json.data;
-    const net = Object.fromEntries(r.balances.map((b: Json) => [b.name, b.net]));
-    // Alice +20000 (60000 paid, 40000 owed), Bob -30000, Chi +10000.
-    expect(net).toEqual({ Alice: 20000, Bob: -30000, Chi: 10000 });
-    expect(r.totalSpent).toBe(70000);
-
-    // Alice can only take 20000 from Bob, so Bob's direct debt to her is paid in part: "direct", with
-    // the full 30000 direct debt reported. Bob's remaining 10000 has no direct creditor left and goes
-    // to Chi as the leftover, labelled offset with no direct debt of its own.
-    expect(r.transfers).toEqual([
-      { fromMemberId: bobM, toMemberId: aliceM, amount: 20000, basis: "direct", directDebt: 30000 },
-      { fromMemberId: bobM, toMemberId: chiM, amount: 10000, basis: "offset", directDebt: 0 },
-    ]);
+    expect(r.transfers).toEqual([{ fromMemberId: aliceM, toMemberId: bobM, amount: 50000 }]);
   });
 
   it("is only visible to group members", async () => {
@@ -923,192 +883,6 @@ describe("settlement", () => {
     const eve = new Client();
     await h.register(eve, { username: "eve", displayName: "Eve", password: "secret3" });
     expect((await h.settlement(eve, gid)).status).toBe(403);
-  });
-});
-
-// ---------------------------------------------------------------------------- pairs
-
-describe("pairs", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  /** One member's pair statements, keyed by the counterparty's member id. */
-  async function statementsOf(c: Client, gid: string, memberId: string) {
-    const res = await h.pairs(c, gid, memberId);
-    expect(res.status).toBe(200);
-    return new Map<string, Json>(
-      res.json.data.pairs.map((p: Json) => [p.counterpartyMemberId, p] as [string, Json]),
-    );
-  }
-
-  it("each member's statements sum to that member's settlement net, and each pair is antisymmetric", async () => {
-    const { alice, bob, gid, aliceM, bobM, chiM } = await setup();
-    await h.createExpense(alice, gid, {
-      title: "A", amount: 90000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM, chiM],
-    });
-    await h.createExpense(bob, gid, {
-      title: "B", amount: 50000, paidByMemberId: bobM, participantMemberIds: [aliceM, bobM],
-    });
-    await h.createExpense(bob, gid, {
-      title: "Thanh toán", amount: 20000, paidByMemberId: bobM, participantMemberIds: [aliceM], kind: "payment",
-    });
-
-    const settlement = (await h.settlement(alice, gid)).json.data;
-    const ids = settlement.balances.map((b: Json) => b.memberId as string);
-    const byMember = new Map<string, Map<string, Json>>();
-    for (const id of ids) byMember.set(id, await statementsOf(alice, gid, id));
-
-    // Field by field against the settlement endpoint: the pair nets of one member add up to its net.
-    for (const balance of settlement.balances) {
-      const total = [...byMember.get(balance.memberId)!.values()].reduce((t, p) => t + p.net, 0);
-      expect(total, balance.name).toBe(balance.net);
-    }
-    // Each pair seen from both ends: one side's net is the negation of the other's.
-    for (const a of ids) {
-      for (const b of ids) {
-        if (a === b) continue;
-        const ab = byMember.get(a)!.get(b)?.net ?? 0;
-        const ba = byMember.get(b)!.get(a)?.net ?? 0;
-        expect(ab + ba).toBe(0);
-      }
-    }
-  });
-
-  it("an edit after a payment is a revision with afterLaterPayment and the before and after amounts and shares", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-03-01T10:00:00.000Z"));
-    const { alice, bob, gid, aliceM, bobM } = await setup();
-    const exp = (
-      await h.createExpense(alice, gid, {
-        title: "Khách sạn", amount: 90000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
-      })
-    ).json.data.expense;
-
-    vi.setSystemTime(new Date("2026-03-02T10:00:00.000Z"));
-    await h.createExpense(bob, gid, {
-      title: "Thanh toán", amount: 20000, paidByMemberId: bobM, participantMemberIds: [aliceM], kind: "payment",
-    });
-
-    vi.setSystemTime(new Date("2026-03-03T10:00:00.000Z"));
-    await h.updateExpense(alice, gid, exp.id, {
-      title: "Khách sạn", amount: 60000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
-    });
-
-    const statement = (await statementsOf(alice, gid, aliceM)).get(bobM)!;
-    const event = statement.events.find((e: Json) => e.expenseId === exp.id);
-    expect(event.revisions).toEqual([
-      {
-        at: "2026-03-03T10:00:00.000Z",
-        actorName: "Alice",
-        action: "update",
-        beforeAmount: 90000,
-        afterAmount: 60000,
-        beforeMemberShare: 45000,
-        afterMemberShare: 30000,
-        beforeCounterpartyShare: 45000,
-        afterCounterpartyShare: 30000,
-        afterLaterPayment: true,
-      },
-    ]);
-  });
-
-  it("a deleted expense leaves events and shows in removedRevisions, flagged afterLaterPayment after a payment", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-03-01T10:00:00.000Z"));
-    const { alice, bob, gid, aliceM, bobM } = await setup();
-    const exp = (
-      await h.createExpense(alice, gid, {
-        title: "Vé", amount: 60000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
-      })
-    ).json.data.expense;
-
-    vi.setSystemTime(new Date("2026-03-02T10:00:00.000Z"));
-    const paid = await h.createExpense(bob, gid, {
-      title: "Thanh toán", amount: 10000, paidByMemberId: bobM, participantMemberIds: [aliceM], kind: "payment",
-    });
-
-    vi.setSystemTime(new Date("2026-03-03T10:00:00.000Z"));
-    await h.deleteExpense(alice, gid, exp.id);
-
-    const statement = (await statementsOf(bob, gid, bobM)).get(aliceM)!;
-    // Bob's view: the deleted expense is gone from events; only the payment is a live event.
-    expect(statement.events.map((e: Json) => e.expenseId)).toEqual([paid.json.data.expense.id]);
-    expect(statement.removedRevisions).toEqual([
-      {
-        expenseId: exp.id,
-        title: "Vé",
-        at: "2026-03-03T10:00:00.000Z",
-        actorName: "Alice",
-        action: "delete",
-        beforeAmount: 60000,
-        afterAmount: null,
-        beforeMemberShare: 30000,
-        afterMemberShare: null,
-        beforeCounterpartyShare: 30000,
-        afterCounterpartyShare: null,
-        afterLaterPayment: true,
-      },
-    ]);
-  });
-
-  it("a payment between the pair is an event with the right sign and cancels the expense debt in the running net", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-03-01T10:00:00.000Z"));
-    const { alice, bob, gid, aliceM, bobM } = await setup();
-    await h.createExpense(alice, gid, {
-      title: "Vé", amount: 60000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
-    });
-    vi.setSystemTime(new Date("2026-03-02T10:00:00.000Z"));
-    await h.createExpense(bob, gid, {
-      title: "Thanh toán", amount: 10000, paidByMemberId: bobM, participantMemberIds: [aliceM], kind: "payment",
-    });
-
-    const fromAlice = (await statementsOf(alice, gid, aliceM)).get(bobM)!;
-    expect(fromAlice.events.map((e: Json) => [e.kind, e.delta, e.runningNet])).toEqual([
-      ["expense", 30000, 30000],
-      ["payment", -10000, 20000],
-    ]);
-    expect(fromAlice.events[1]).toMatchObject({ paidByMemberId: bobM, paidByName: "Bob" });
-    expect(fromAlice.net).toBe(20000);
-
-    // The other end of the same pair is the exact negation.
-    const fromBob = (await statementsOf(bob, gid, bobM)).get(aliceM)!;
-    expect(fromBob.net).toBe(-20000);
-  });
-
-  it("two groups of the same user never leak rows into each other's statements", async () => {
-    const { alice, gid, aliceM, bobM } = await setup();
-    const other = (await h.createGroup(alice, "Nhóm khác")).json.data.group;
-    const dan = (await h.addMember(alice, other.id, { name: "Dan" })).json.data.member;
-    await h.createExpense(alice, other.id, {
-      title: "Riêng", amount: 40000, paidByMemberId: other.myMemberId, participantMemberIds: [other.myMemberId, dan.id],
-    });
-    await h.createExpense(alice, gid, {
-      title: "Chung", amount: 30000, paidByMemberId: aliceM, participantMemberIds: [aliceM, bobM],
-    });
-
-    const { pairs } = (await h.pairs(alice, gid, aliceM)).json.data;
-    expect(pairs.map((p: Json) => p.counterpartyName)).toEqual(["Bob"]);
-    expect(pairs.flatMap((p: Json) => p.events.map((e: Json) => e.title))).toEqual(["Chung"]);
-
-    const { pairs: otherPairs } = (await h.pairs(alice, other.id, other.myMemberId)).json.data;
-    expect(otherPairs.map((p: Json) => p.counterpartyName)).toEqual(["Dan"]);
-    expect(otherPairs.flatMap((p: Json) => p.events.map((e: Json) => e.title))).toEqual(["Riêng"]);
-  });
-
-  it("answers 404 for a member of another group, 404 for an unknown id, 403 for a non-member, 401 without a session", async () => {
-    const { alice, gid, aliceM } = await setup();
-    const other = (await h.createGroup(alice, "Khác")).json.data.group;
-    expect((await h.pairs(alice, gid, other.myMemberId)).status).toBe(404);
-    expect((await h.pairs(alice, gid, "no-such-member")).status).toBe(404);
-
-    const eve = new Client();
-    await h.register(eve, { username: "eve", displayName: "Eve", password: "secret3" });
-    expect((await h.pairs(eve, gid, aliceM)).status).toBe(403);
-
-    const anon = await call(new Client(), pairsGET, { params: { groupId: gid, memberId: aliceM } });
-    expect(anon.status).toBe(401);
   });
 });
 

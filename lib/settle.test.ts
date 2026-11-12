@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { toBalances, type MemberTotals } from "./settle";
+import { computeTransfers, toBalances, type MemberTotals } from "./settle";
 
 /** Spending-only totals: every amount is an expense, no settlement payments. */
 const totals = (rows: Array<[string, number, number]>) =>
@@ -17,6 +17,16 @@ const totals = (rows: Array<[string, number, number]>) =>
       paymentsIn: 0,
     })),
   );
+
+/** Applies transfers to the balances and returns what is still outstanding per member. */
+function residual(balances: ReturnType<typeof totals>, transfers: ReturnType<typeof computeTransfers>) {
+  const net = new Map(balances.map((b) => [b.memberId, b.net]));
+  for (const t of transfers) {
+    net.set(t.fromMemberId, (net.get(t.fromMemberId) ?? 0) + t.amount);
+    net.set(t.toMemberId, (net.get(t.toMemberId) ?? 0) - t.amount);
+  }
+  return [...net.values()];
+}
 
 /** A live row as the database holds it: one payer, shares keyed by member id. */
 interface Row {
@@ -136,5 +146,41 @@ describe("per-member split of paid and owed", () => {
   it("a member with no rows gets all four split fields at 0", () => {
     const [idle] = toBalances(fromRows(scenario, ["nobody"]));
     expect(idle).toMatchObject({ paid: 0, owed: 0, net: 0, spentPaid: 0, spentOwed: 0, paymentsOut: 0, paymentsIn: 0 });
+  });
+});
+
+describe("computeTransfers", () => {
+  it("returns nothing when everyone is even", () => {
+    expect(computeTransfers(totals([["a", 50, 50], ["b", 20, 20]]))).toEqual([]);
+  });
+
+  it("one creditor, two debtors", () => {
+    const balances = totals([["a", 90, 30], ["b", 0, 30], ["c", 0, 30]]);
+    const transfers = computeTransfers(balances);
+    expect(transfers).toEqual([
+      { fromMemberId: "b", toMemberId: "a", amount: 30 },
+      { fromMemberId: "c", toMemberId: "a", amount: 30 },
+    ]);
+  });
+
+  it("settles everyone to zero with at most n-1 transfers", () => {
+    const balances = totals([
+      ["a", 300, 100],
+      ["b", 0, 150],
+      ["c", 100, 250],
+      ["d", 250, 50],
+      ["e", 0, 100],
+    ]);
+    const transfers = computeTransfers(balances);
+    expect(transfers.length).toBeLessThanOrEqual(balances.length - 1);
+    expect(residual(balances, transfers).every((n) => n === 0)).toBe(true);
+    expect(transfers.every((t) => t.amount > 0)).toBe(true);
+  });
+
+  it("is deterministic regardless of input order", () => {
+    const rows: Array<[string, number, number]> = [["x", 0, 40], ["y", 0, 40], ["z", 80, 0]];
+    const forward = computeTransfers(totals(rows));
+    const reversed = computeTransfers(totals([...rows].reverse()));
+    expect(reversed).toEqual(forward);
   });
 });

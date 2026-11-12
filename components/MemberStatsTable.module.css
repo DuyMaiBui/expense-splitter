@@ -1,0 +1,109 @@
+/* The "Thống kê từng người" table, shared by the settle and stats pages. Mobile first at 375px:
+   the table scrolls sideways inside its own box, never the page. The name column is sticky, so
+   the name and the balance (the second column) stay on screen while the rest scrolls. Colours
+   come from the global variables, so dark mode follows the rest of the app. */
+
+.scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Keeps the scroll box inside the card's padding on a phone. */
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.table th,
+.table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.table thead th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* The sticky first column. Its background must be opaque so scrolled cells pass underneath it. */
+.name {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 96px;
+  max-width: 128px;
+  text-align: left;
+  background: var(--surface);
+}
+
+.nameText {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-weight: 600;
+}
+
+.table tbody th.name {
+  font-weight: 600;
+}
+
+/* The balance cell: sign and amount, then the word, then this person's own transfer lines. */
+.balance {
+  min-width: 128px;
+}
+
+.balance .amount {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.standing {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+/* Muted and wrapping: long transfer lines break inside the cell instead of widening the table. */
+.lines {
+  display: block;
+  max-width: 200px;
+  margin-left: auto;
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.detail {
+  text-align: center;
+}
+
+.table tfoot th,
+.table tfoot td {
+  border-top: 2px solid var(--border);
+  border-bottom: 0;
+  font-weight: 700;
+}
+
+.formula {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

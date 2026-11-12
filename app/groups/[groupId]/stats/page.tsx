@@ -7,6 +7,7 @@ import { BarChart } from "@/components/charts/BarChart";
 import { DonutChart } from "@/components/charts/DonutChart";
 import { RangePicker } from "@/components/charts/RangePicker";
 import { Icon, IconButton } from "@/components/Icon";
+import { MemberStatsTable } from "@/components/MemberStatsTable";
 import { api } from "@/lib/api-client";
 import { formatVnd } from "@/lib/format";
 import { VN_OFFSET_HOURS } from "@/lib/stats";
@@ -224,6 +225,10 @@ export default function StatsPage() {
           )}
         </div>
       )}
+
+      {/* Cumulative from the start of the group: it does not follow the period picker above, so it
+          is not wired to `period`. The refresh button re-reads it through the same token. */}
+      <MemberStatsTable groupId={groupId} reloadKey={reloadToken} readOnly />
     </main>
   );
 }

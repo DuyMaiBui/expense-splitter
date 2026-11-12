@@ -36,28 +36,6 @@ export function signedVnd(amount: number): string {
   return formatVnd(0);
 }
 
-/** The two views of the member dialog: the per-row history, or the per-counterparty statement. */
-export type MemberView = "ledger" | "pairs";
-
-interface MemberViewToggleProps {
-  view: MemberView;
-  onChange: (view: MemberView) => void;
-}
-
-/** The two-option switch at the top of the member dialog. Same segment styling as the scope toggle. */
-export function MemberViewToggle({ view, onChange }: MemberViewToggleProps) {
-  return (
-    <div className={styles.segment} role="group" aria-label="Chế độ xem">
-      <button type="button" aria-pressed={view === "ledger"} onClick={() => onChange("ledger")}>
-        Từng lần chi/nhận
-      </button>
-      <button type="button" aria-pressed={view === "pairs"} onClick={() => onChange("pairs")}>
-        Đối chiếu từng người
-      </button>
-    </div>
-  );
-}
-
 function kindLabel(entry: LedgerEntry): string {
   if (entry.kind === "expense") {
     return "Chi tiêu";
@@ -80,7 +58,7 @@ function toneClass(delta: number): string {
  * always covers the whole history (it is the balance split); the waterfall and the list follow
  * the toggle: since the last "huề" (default) or the full history.
  *
- * Presentational: the page owns fetching and caching, and passes the loaded state down.
+ * Presentational: MemberStatsTable owns fetching and caching, and passes the loaded state down.
  */
 export function MemberLedgerPanel({ balance, state, onRetry }: MemberLedgerPanelProps) {
   const [view, setView] = useState<LedgerView>("cycle");
