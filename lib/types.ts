@@ -181,7 +181,16 @@ export interface LogEntry {
   createdAt: string;
 }
 
-/** A member's settlement position. `net = paid - owed`; net > 0 means they should receive money. */
+/**
+ * A member's settlement position. `net = paid - owed`; net > 0 means they should receive money.
+ *
+ * `paid` and `owed` mix spending with settlement transfers, so the four fields below split them:
+ * `paid = spentPaid + paymentsOut` and `owed = spentOwed + paymentsIn`, hence
+ * `net = (spentPaid - spentOwed) + (paymentsOut - paymentsIn)`. The UI reads the split to tell
+ * real spending ("chi ra" / "nhận lại") apart from money that moved to settle debt.
+ * Group-wide, `sum(spentPaid) = sum(spentOwed) = totalSpent` and `sum(paymentsOut) = sum(paymentsIn)`.
+ * All four are integer VND >= 0; a member with no rows has all four at 0.
+ */
 export interface Balance {
   memberId: string;
   name: string;
@@ -189,6 +198,14 @@ export interface Balance {
   paid: number;
   owed: number;
   net: number;
+  /** Sum of the amounts of live `kind = "expense"` rows this member paid. */
+  spentPaid: number;
+  /** Sum of this member's shares on live `kind = "expense"` rows. */
+  spentOwed: number;
+  /** Sum of the amounts of live `kind = "payment"` rows this member paid (money sent to settle debt). */
+  paymentsOut: number;
+  /** Sum of this member's shares on live `kind = "payment"` rows (money received to settle debt). */
+  paymentsIn: number;
 }
 
 /** A single settlement payment suggestion. */
@@ -288,3 +305,58 @@ export interface ApiFailure {
 }
 
 export type ApiEnvelope<T extends object> = ApiSuccess<T> | ApiFailure;
+
+/**
+ * One row of a member's ledger: every live expense or payment that involves the member (as payer,
+ * as participant, or both). Computed by lib/ledger.ts; reflects the CURRENT state of each row.
+ *
+ * `paid` is what this member paid on the row (`expense.amount` when they are the payer, else 0);
+ * `share` is this member's `expense_shares.amount` on the row (0 if none). `delta = paid - share`.
+ * `runningNet` is the cumulative sum of `delta` through this row, in ledger order. The member is
+ * "huề" (settled) after a row when `runningNet === 0` (`settledAfter`).
+ *
+ * `counterpartyMemberId`/`counterpartyName` are set only for `kind = "payment"`: the OTHER party
+ * (the receiver when this member paid, the payer when this member received). Null for expenses.
+ */
+export interface LedgerEntry {
+  expenseId: string;
+  kind: ExpenseKind;
+  title: string;
+  /** ISO UTC, as stored. Display only: entries are ordered by `createdAt` (entry time), never by this. */
+  spentAt: string;
+  paidByMemberId: string;
+  paidByName: string;
+  /** Integer VND this member paid on this row. */
+  paid: number;
+  /** Integer VND this member owes on this row (their share). */
+  share: number;
+  /** `paid - share`: >0 raises what the member is owed, <0 lowers it. */
+  delta: number;
+  /** Cumulative sum of `delta` including this row, in ledger order. */
+  runningNet: number;
+  /** `runningNet === 0` after this row ("huề"). */
+  settledAfter: boolean;
+  counterpartyMemberId: string | null;
+  counterpartyName: string | null;
+}
+
+/**
+ * Same meaning as `Balance` (see above), computed over ledger entries. `net` = sum of `delta`, and
+ * `net = (spentPaid - spentOwed) + (paymentsOut - paymentsIn)`.
+ */
+export interface LedgerTotals {
+  spentPaid: number;
+  spentOwed: number;
+  paymentsOut: number;
+  paymentsIn: number;
+  net: number;
+}
+
+/** One member's full ledger, from their first row to now, in ledger order. */
+export interface MemberLedger {
+  memberId: string;
+  name: string;
+  removed: boolean;
+  entries: LedgerEntry[];
+  totals: LedgerTotals;
+}

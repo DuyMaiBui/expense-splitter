@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Icon, IconButton } from "@/components/Icon";
+import { SettleBalances } from "@/components/SettleBalances";
+import { type LedgerState } from "@/components/MemberLedgerPanel";
 import { PaymentQrDialog } from "@/components/PaymentQrDialog";
-import { api } from "@/lib/api-client";
+import { api, invalidateApiCache } from "@/lib/api-client";
 import { formatVnd } from "@/lib/format";
-import type { Balance, Member, Transfer, Viewer } from "@/lib/types";
+import type { Balance, Member, MemberLedger, Transfer, Viewer } from "@/lib/types";
 
 interface Settlement {
   balances: Balance[];
@@ -17,6 +19,8 @@ interface Settlement {
   /** The caller relative to this group: the row button is shown only to the one who owes. */
   viewer: Viewer;
 }
+
+const LEDGER_ERROR = "Không tải được lịch sử giao dịch. Vui lòng thử lại.";
 
 export default function SettlePage() {
   const { groupId } = useParams<{ groupId: string }>();
@@ -29,6 +33,11 @@ export default function SettlePage() {
   // The row the dialog is open for. Recording the payment happens inside that dialog now, so
   // there is no "start at the confirm step" variant to carry alongside it.
   const [selected, setSelected] = useState<Transfer | null>(null);
+  // Per-member ledgers: fetched the first time a row opens, then kept until a refresh or payment.
+  const [ledgers, setLedgers] = useState<Record<string, LedgerState>>({});
+  const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Bumped whenever the cache is cleared, so a response still in flight from before is dropped.
+  const ledgerEpoch = useRef(0);
 
   const load = useCallback(
     async (fresh = false) => {
@@ -51,6 +60,53 @@ export default function SettlePage() {
     void load();
   }, [load]);
 
+  const loadLedger = useCallback(
+    async (memberId: string) => {
+      const epoch = ledgerEpoch.current;
+      setLedgers((prev) => ({ ...prev, [memberId]: { status: "loading" } }));
+      try {
+        const { ledger } = await api<{ ledger: MemberLedger }>(
+          `/api/groups/${groupId}/members/${memberId}/ledger`,
+        );
+        if (epoch === ledgerEpoch.current) {
+          setLedgers((prev) => ({ ...prev, [memberId]: { status: "ready", ledger } }));
+        }
+      } catch {
+        if (epoch === ledgerEpoch.current) {
+          setLedgers((prev) => ({ ...prev, [memberId]: { status: "error", message: LEDGER_ERROR } }));
+        }
+      }
+    },
+    [groupId],
+  );
+
+  // Fetch each open row's ledger exactly once: a missing entry is the only trigger, and the
+  // "loading" entry written by loadLedger stops a second request for the same member.
+  useEffect(() => {
+    for (const memberId of openIds) {
+      if (ledgers[memberId] === undefined) {
+        void loadLedger(memberId);
+      }
+    }
+  }, [openIds, ledgers, loadLedger]);
+
+  function toggleLedger(memberId: string): void {
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(memberId)) {
+        next.delete(memberId);
+      } else {
+        next.add(memberId);
+      }
+      return next;
+    });
+  }
+
+  function resetLedgers(): void {
+    ledgerEpoch.current += 1;
+    setLedgers({});
+  }
+
   const nameOf = (id: string) => data?.balances.find((b) => b.memberId === id)?.name ?? "?";
   const memberOf = (id: string) => members?.find((m) => m.id === id) ?? null;
 
@@ -61,6 +117,14 @@ export default function SettlePage() {
     setSelected(null);
     setNotice(report);
     setError(null);
+    resetLedgers();
+    void load(true);
+  }
+
+  // The refresh button also drops the client-side ledger copies, so open rows re-read them.
+  function refresh(): void {
+    invalidateApiCache(`/api/groups/${groupId}/members/`);
+    resetLedgers();
     void load(true);
   }
 
@@ -72,7 +136,7 @@ export default function SettlePage() {
           <span>Tổng chi tiêu</span>
           <strong className="amount">{data ? formatVnd(data.totalSpent) : "…"}</strong>
         </span>
-        <IconButton icon="refresh" label="Làm mới" variant="ghost" onClick={() => void load(true)} />
+        <IconButton icon="refresh" label="Làm mới" variant="ghost" onClick={refresh} />
       </div>
 
       {error && <p className="error">{error}</p>}
@@ -125,46 +189,13 @@ export default function SettlePage() {
             )}
           </section>
 
-          <section className="card stack">
-            <h2 className="row row-nowrap">
-              <Icon name="scale" />
-              <span>Chi tiết từng người</span>
-            </h2>
-            {/* The net position is the answer a member opens this page for, so it is the figure
-                they read first; paid/owed stay as a small line underneath. A 4-column table on a
-                phone wrapped every amount and pushed the meaningful column off screen. */}
-            {data.balances.length === 0 ? (
-              <p className="empty">Nhóm chưa có ai.</p>
-            ) : (
-              data.balances.map((b) => (
-                <div key={b.memberId} className="stack balance-row">
-                  <div className="row row-between row-nowrap">
-                    <span className="row row-nowrap grow">
-                      <strong className="truncate" title={b.name}>
-                        {b.name}
-                      </strong>
-                      {b.removed && <span className="badge">đã xóa</span>}
-                    </span>
-                    <strong
-                      className={
-                        b.net > 0 ? "amount amount-pos" : b.net < 0 ? "amount amount-neg" : "amount"
-                      }
-                    >
-                      {b.net > 0
-                        ? `+${formatVnd(b.net)} nhận lại`
-                        : b.net < 0
-                          ? `${formatVnd(b.net)} còn phải trả`
-                          : "đã huề"}
-                    </strong>
-                  </div>
-                  <span className="meta">
-                    <Icon name="wallet" size={16} />
-                    Đã trả {formatVnd(b.paid)} · Phải chịu {formatVnd(b.owed)}
-                  </span>
-                </div>
-              ))
-            )}
-          </section>
+          <SettleBalances
+            balances={data.balances}
+            openIds={openIds}
+            ledgers={ledgers}
+            onToggle={toggleLedger}
+            onRetry={(memberId) => void loadLedger(memberId)}
+          />
         </>
       )}
 
