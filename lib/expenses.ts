@@ -1,4 +1,5 @@
 import { badRequest } from "./errors";
+import { MAX_ADJUST, MIN_ADJUST, splitWeighted } from "./split-weight";
 import type { Expense, ExpenseKind, ExpenseShare, Member } from "./types";
 import { int, isoDate, obj, str, strArray } from "./validate";
 
@@ -13,6 +14,11 @@ export interface ExpenseInput {
   note: string | null;
   /** `payment` must name exactly one participant, the member who received the money. */
   kind: ExpenseKind;
+  /**
+   * Per-participant adjustments (percent on top of a normal share, lib/split-weight.ts); only
+   * non-zero entries, every key a participant. Empty means the equal split.
+   */
+  adjustments: Map<string, number>;
 }
 
 export function parseExpenseInput(raw: unknown): ExpenseInput {
@@ -35,9 +41,48 @@ export function parseExpenseInput(raw: unknown): ExpenseInput {
   }
 
   const kind = parseKind(body.kind);
-  const input: ExpenseInput = { title, amount, paidByMemberId, participantMemberIds, spentAt, note, kind };
+  const adjustments = parseAdjustments(body.adjustments, participantMemberIds);
+  const input: ExpenseInput = { title, amount, paidByMemberId, participantMemberIds, spentAt, note, kind, adjustments };
   assertPaymentShape(input);
   return input;
+}
+
+/**
+ * Optional `adjustments`: `{ [memberId]: integer -100..1000 }`, the percent each participant
+ * pays on top of a normal share. Keys must be participants; zeros are dropped; absent or null
+ * means the equal split. At least one participant must keep a weight above zero.
+ */
+function parseAdjustments(raw: unknown, participantMemberIds: readonly string[]): Map<string, number> {
+  if (raw === undefined || raw === null) {
+    return new Map();
+  }
+  const body = obj(raw, "adjustments");
+  const participants = new Set(participantMemberIds);
+  const result = new Map<string, number>();
+  for (const [memberId, value] of Object.entries(body)) {
+    if (!participants.has(memberId)) {
+      throw badRequest("Chỉ điều chỉnh được phần của người tham gia chi tiêu.");
+    }
+    const adjust = int(value, `adjustments.${memberId}`, { min: MIN_ADJUST, max: MAX_ADJUST });
+    if (adjust !== 0) {
+      result.set(memberId, adjust);
+    }
+  }
+  if (participantMemberIds.every((id) => result.get(id) === MIN_ADJUST)) {
+    throw badRequest("Phải có ít nhất một người trả tiền trong chi tiêu này.");
+  }
+  return result;
+}
+
+/**
+ * The shares to store, computed on the server from the adjustments (never taken from the
+ * body). A payment has one receiver who takes the whole amount, so adjustments are refused.
+ */
+export function resolveShares(input: ExpenseInput, kind: ExpenseKind): ExpenseShare[] {
+  if (kind === "payment" && input.adjustments.size > 0) {
+    throw badRequest("Khoản thanh toán không thể chia theo hệ số.");
+  }
+  return splitWeighted(input.amount, input.participantMemberIds, input.adjustments);
 }
 
 /** Absent means "expense"; anything but the two documented values is a 400. */
@@ -119,6 +164,7 @@ interface ShareRow {
   expense_id: string;
   member_id: string;
   amount: number;
+  adjust_pct: number;
 }
 
 const EXPENSE_COLUMNS = `
@@ -159,7 +205,7 @@ function assemble(rows: ExpenseRow[], shareRows: ShareRow[]): Expense[] {
   const sharesByExpense = new Map<string, ExpenseShare[]>();
   for (const row of shareRows) {
     const list = sharesByExpense.get(row.expense_id) ?? [];
-    list.push({ memberId: row.member_id, amount: row.amount });
+    list.push({ memberId: row.member_id, amount: row.amount, adjustPct: row.adjust_pct });
     sharesByExpense.set(row.expense_id, list);
   }
 
@@ -186,7 +232,8 @@ export async function loadExpenseList(
       .bind(groupId, fetchCount),
     db
       .prepare(
-        `SELECT es.expense_id AS expense_id, es.member_id AS member_id, es.amount AS amount
+        `SELECT es.expense_id AS expense_id, es.member_id AS member_id, es.amount AS amount,
+               es.adjust_pct AS adjust_pct
          FROM expense_shares es
          WHERE es.expense_id IN (
            SELECT e.id FROM expenses e
@@ -221,7 +268,8 @@ export async function loadExpense(
       .bind(expenseId, groupId),
     db
       .prepare(
-        `SELECT es.expense_id AS expense_id, es.member_id AS member_id, es.amount AS amount
+        `SELECT es.expense_id AS expense_id, es.member_id AS member_id, es.amount AS amount,
+               es.adjust_pct AS adjust_pct
          FROM expense_shares es WHERE es.expense_id = ? ORDER BY es.member_id ASC`,
       )
       .bind(expenseId),

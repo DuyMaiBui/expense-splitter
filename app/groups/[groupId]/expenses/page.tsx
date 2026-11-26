@@ -9,6 +9,7 @@ import { api } from "@/lib/api-client";
 import { formatDateTime, formatVnd } from "@/lib/format";
 import { canModifyExpense } from "@/lib/permissions";
 import { summarizeSplit } from "@/lib/split-label";
+import { formatAdjust } from "@/lib/split-weight";
 import type { Expense, Member, Viewer } from "@/lib/types";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
@@ -137,15 +138,36 @@ export default function ExpensesPage() {
                 {!isPayment && (
                   <div className="meta">
                     <Icon name="users" size={16} />
-                    <span className="grow">
-                      {split.equal
-                        ? split.everyone
-                          ? "Chia đều cả nhóm"
-                          : `Chia cho: ${split.names.join(", ")}`
-                        : `Chia cho: ${split.entries
-                            .map((entry) => `${entry.name} ${formatVnd(entry.amount)}`)
-                            .join(" · ")}`}
-                    </span>
+                    {split.adjusted ? (
+                      // An adjusted split: one line per adjustment, highest first, each with the
+                      // amount per person; people left at a normal share read without a badge.
+                      <span className="grow split-summary">
+                        {split.groups.map((group) => (
+                          <span key={group.adjustPct} className="split-summary-line">
+                            <span>{group.names.join(", ")}</span>
+                            {group.adjustPct !== 0 && (
+                              <span className={`badge ${group.adjustPct > 0 ? "badge-up" : "badge-down"}`}>
+                                {formatAdjust(group.adjustPct)}
+                              </span>
+                            )}
+                            <span className="muted">
+                              · {group.names.length > 1 ? "mỗi người " : ""}
+                              {formatVnd(group.amount)}
+                            </span>
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="grow">
+                        {split.equal
+                          ? split.everyone
+                            ? "Chia đều cả nhóm"
+                            : `Chia cho: ${split.names.join(", ")}`
+                          : `Chia cho: ${split.entries
+                              .map((entry) => `${entry.name} ${formatVnd(entry.amount)}`)
+                              .join(" · ")}`}
+                      </span>
+                    )}
                   </div>
                 )}
 

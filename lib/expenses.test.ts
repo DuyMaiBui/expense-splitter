@@ -21,7 +21,7 @@ const codeOf = (fn: () => unknown): string | undefined => {
 
 describe("parseExpenseInput", () => {
   it("accepts a minimal body and defaults optional fields", () => {
-    expect(parseExpenseInput(valid)).toEqual({ ...valid, spentAt: null, note: null, kind: "expense" });
+    expect(parseExpenseInput(valid)).toEqual({ ...valid, spentAt: null, note: null, kind: "expense", adjustments: new Map() });
   });
 
   it("defaults kind to expense and keeps an explicit payment", () => {
@@ -118,6 +118,7 @@ describe("assertMembersAllowed", () => {
     spentAt: null,
     note: null,
     kind: "expense",
+    adjustments: new Map(),
     ...over,
   });
   const existing = {

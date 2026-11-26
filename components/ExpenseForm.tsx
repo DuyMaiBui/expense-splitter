@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Icon, IconButton } from "@/components/Icon";
+import { SplitEditor } from "@/components/SplitEditor";
 import { api } from "@/lib/api-client";
 import { formatVnd, isoToLocalInput, localInputToIso, parseAmountInput } from "@/lib/format";
 import { MAX_QUANTITY, presetAmount } from "@/lib/presets";
 import { splitEqual } from "@/lib/split";
+import { adjustmentsOf } from "@/lib/split-weight";
 import type { Expense, Group, Member, Preset } from "@/lib/types";
 
 interface ExpenseFormProps {
@@ -40,6 +42,10 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
   const [participants, setParticipants] = useState<Set<string>>(new Set());
   const [spentAt, setSpentAt] = useState(() => isoToLocalInput(new Date().toISOString()));
   const [note, setNote] = useState("");
+  // Custom split: off = equal. `adjustments` holds only the non-zero ones (percent on top of a
+  // normal share, lib/split-weight.ts).
+  const [customSplit, setCustomSplit] = useState(false);
+  const [adjustments, setAdjustments] = useState<Map<string, number>>(new Map());
 
   // Preset entry is an alternative way to fill the amount, never required.
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -81,6 +87,9 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
           setParticipants(new Set(expense.shares.map((s) => s.memberId)));
           setSpentAt(isoToLocalInput(expense.spentAt));
           setNote(expense.note ?? "");
+          const restored = adjustmentsOf(expense.shares);
+          setAdjustments(restored);
+          setCustomSplit(restored.size > 0);
         } else {
           // The admin account has no member row: default the payer to the first active member.
           setPaidBy(
@@ -190,6 +199,11 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
         amount,
         paidByMemberId: paidBy,
         participantMemberIds: [...participants],
+        // The server computes the shares from these; adjustments of people no longer chosen are
+        // dropped, and "Chia đều" sends none.
+        adjustments: customSplit
+          ? Object.fromEntries([...adjustments].filter(([id]) => participants.has(id)))
+          : null,
         spentAt: localInputToIso(spentAt) || undefined,
         note: note.trim() === "" ? null : note,
       };
@@ -375,19 +389,54 @@ export function ExpenseForm({ groupId, expenseId }: ExpenseFormProps) {
         </div>
       </div>
 
-      {preview.length > 0 && (
-        <div className="meta">
-          <Icon name="scale" size={16} />
-          {/* Every participant pays the same figure up to 1đ (the split rule gives the first
-              `amount mod n` people base+1), so the per-person amounts are not repeated here. */}
-          <span>
-            {amount % preview.length === 0
-              ? `Chia đều ${preview.length} người · mỗi người ${formatVnd(amount / preview.length)}`
-              : `Chia đều ${preview.length} người · mỗi người ≈ ${formatVnd(
-                  Math.floor(amount / preview.length),
-                )} (dư ${formatVnd(amount % preview.length)})`}
-          </span>
+      {participants.size > 1 && (
+        <div className="row" role="radiogroup" aria-label="Cách chia">
+          <button
+            type="button"
+            role="radio"
+            className="chip"
+            aria-checked={!customSplit}
+            aria-pressed={!customSplit}
+            onClick={() => setCustomSplit(false)}
+          >
+            Chia đều
+          </button>
+          <button
+            type="button"
+            role="radio"
+            className="chip"
+            aria-checked={customSplit}
+            aria-pressed={customSplit}
+            onClick={() => setCustomSplit(true)}
+          >
+            Điều chỉnh %
+          </button>
         </div>
+      )}
+
+      {customSplit && participants.size > 1 ? (
+        <SplitEditor
+          amount={amount}
+          participantIds={[...participants]}
+          members={selectable}
+          adjustments={adjustments}
+          onChange={setAdjustments}
+        />
+      ) : (
+        preview.length > 0 && (
+          <div className="meta">
+            <Icon name="scale" size={16} />
+            {/* Every participant pays the same figure up to 1đ (the split rule gives the first
+                `amount mod n` people base+1), so the per-person amounts are not repeated here. */}
+            <span>
+              {amount % preview.length === 0
+                ? `Chia đều ${preview.length} người · mỗi người ${formatVnd(amount / preview.length)}`
+                : `Chia đều ${preview.length} người · mỗi người ≈ ${formatVnd(
+                    Math.floor(amount / preview.length),
+                  )} (dư ${formatVnd(amount % preview.length)})`}
+            </span>
+          </div>
+        )
       )}
 
       <div>

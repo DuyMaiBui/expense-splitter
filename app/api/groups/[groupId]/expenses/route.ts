@@ -2,12 +2,11 @@ import { logStatement } from "@/lib/activity";
 import { requireGroupMember, requireUser } from "@/lib/auth";
 import { getDb, newId, nowIso } from "@/lib/db";
 import { forbidden } from "@/lib/errors";
-import { assertMembersAllowed, loadExpenseList, parseExpenseInput } from "@/lib/expenses";
+import { assertMembersAllowed, loadExpenseList, parseExpenseInput, resolveShares } from "@/lib/expenses";
 import { formatVnd } from "@/lib/format";
 import { buildViewer, listMembers } from "@/lib/group-queries";
 import { ok, readJson, route } from "@/lib/http";
 import { canRecordPayment } from "@/lib/permissions";
-import { splitEqual } from "@/lib/split";
 import type { Expense } from "@/lib/types";
 
 export const GET = route(async (_req, ctx) => {
@@ -46,7 +45,7 @@ export const POST = route(async (req, ctx) => {
   }
 
   const now = nowIso();
-  const shares = splitEqual(input.amount, input.participantMemberIds);
+  const shares = resolveShares(input, input.kind);
   const expense: Expense = {
     id: newId(),
     groupId,
@@ -85,8 +84,10 @@ export const POST = route(async (req, ctx) => {
       ),
     ...shares.map((share) =>
       db
-        .prepare("INSERT INTO expense_shares (expense_id, member_id, amount) VALUES (?, ?, ?)")
-        .bind(expense.id, share.memberId, share.amount),
+        .prepare(
+          "INSERT INTO expense_shares (expense_id, member_id, amount, adjust_pct) VALUES (?, ?, ?, ?)",
+        )
+        .bind(expense.id, share.memberId, share.amount, share.adjustPct ?? 0),
     ),
     logStatement(db, {
       groupId,

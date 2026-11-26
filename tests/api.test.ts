@@ -576,6 +576,75 @@ describe("expenses", () => {
     expect(e.spentAt).toMatch(/Z$/);
   });
 
+  it("splits by adjustment on the server, stores the adjustments and drops them on an equal edit", async () => {
+    const { alice, gid, aliceM, bobM, chiM } = await setup();
+    const r = await h.createExpense(alice, gid, {
+      title: "Ăn tối",
+      amount: 120_000,
+      paidByMemberId: aliceM,
+      participantMemberIds: [aliceM, bobM, chiM],
+      adjustments: { [bobM]: 10, [chiM]: 10, [aliceM]: 0 },
+    });
+    expect(r.status).toBe(201);
+    const view = (e: Json) =>
+      Object.fromEntries(e.shares.map((s: Json) => [s.memberId, [s.amount, s.adjustPct]]));
+    expect(view(r.json.data.expense)).toEqual({
+      [aliceM]: [37_500, 0],
+      [bobM]: [41_250, 10],
+      [chiM]: [41_250, 10],
+    });
+
+    // A reload reads the adjustments back from D1, not from the create response.
+    const id = r.json.data.expense.id;
+    expect(view((await h.getExpense(alice, gid, id)).json.data.expense)).toEqual(view(r.json.data.expense));
+
+    // An edit without `adjustments` goes back to the equal split.
+    const equal = await h.updateExpense(alice, gid, id, {
+      title: "Ăn tối",
+      amount: 90_000,
+      paidByMemberId: aliceM,
+      participantMemberIds: [aliceM, bobM, chiM],
+    });
+    expect(equal.json.data.expense.shares.map((s: Json) => [s.amount, s.adjustPct])).toEqual([
+      [30_000, 0],
+      [30_000, 0],
+      [30_000, 0],
+    ]);
+  });
+
+  it.each([
+    ["an adjustment for a non-participant", (a: string) => ({ [a]: 10, nope: 10 })],
+    ["a non-integer adjustment", (a: string) => ({ [a]: 2.5 })],
+    ["an adjustment above +1000%", (a: string) => ({ [a]: 1001 })],
+    ["an adjustment below −100%", (a: string) => ({ [a]: -101 })],
+    ["everyone at −100%", (a: string, b: string) => ({ [a]: -100, [b]: -100 })],
+    ["an array instead of an object", () => [10]],
+  ])("rejects %s with 400 and writes nothing", async (_label, build) => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    const r = await h.createExpense(alice, gid, {
+      title: "x",
+      amount: 100_000,
+      paidByMemberId: aliceM,
+      participantMemberIds: [aliceM, bobM],
+      adjustments: build(aliceM, bobM),
+    });
+    expect(r.status).toBe(400);
+    expect(count("SELECT COUNT(*) AS c FROM expenses")).toBe(0);
+  });
+
+  it("refuses adjustments on a payment", async () => {
+    const { alice, gid, aliceM, bobM } = await setup();
+    const r = await h.createExpense(alice, gid, {
+      title: "Thanh toán",
+      amount: 1000,
+      paidByMemberId: aliceM,
+      participantMemberIds: [bobM],
+      kind: "payment",
+      adjustments: { [bobM]: 10 },
+    });
+    expect(r.status).toBe(400);
+  });
+
   it("splits only among the chosen participants", async () => {
     const { alice, gid, aliceM, bobM } = await setup();
     const r = await h.createExpense(alice, gid, {

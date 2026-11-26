@@ -7,12 +7,24 @@ import type { ExpenseShare } from "./types";
  * đồng, so a genuinely even split can differ by 1đ between people. Printing every amount after
  * every name then repeats the same figure N times and says nothing. A share counts as EQUAL
  * when the amounts are within 1đ of each other; only a real difference is worth printing.
+ *
+ * A split made with adjustments ("Bình, Chi +10%") is labelled by those adjustments, grouped,
+ * rather than by raw amounts: the adjustment is what the person chose, the amount follows.
  */
 
 /** One participant's share, in the shape the API returns it. */
 export interface SplitEntry {
   memberId: string;
   name: string;
+  amount: number;
+}
+
+/** Participants with the same adjustment (percent on top of a normal share). */
+export interface SplitGroup {
+  names: string[];
+  /** 0 = normal share, +10 = pays 10% more than a normal share. */
+  adjustPct: number;
+  /** Each member's amount (the largest in the group; they differ by at most 1đ). */
   amount: number;
 }
 
@@ -23,8 +35,27 @@ export interface SplitSummary {
   everyone: boolean;
   /** Participant names, in the order the shares arrived. */
   names: string[];
-  /** Every participant with their own amount, for the unequal case. */
+  /** Every participant with their own amount, for an unequal split without adjustments. */
   entries: SplitEntry[];
+  /** At least one participant has a non-zero adjustment. */
+  adjusted: boolean;
+  /**
+   * The split grouped by adjustment, highest first ("Bình, Chi +10% · 41.250đ", then
+   * "Dũng · 37.500đ"). Empty when nobody is adjusted.
+   */
+  groups: SplitGroup[];
+}
+
+function groupByAdjustment(shares: readonly ExpenseShare[], nameOf: (id: string) => string): SplitGroup[] {
+  const byAdjust = new Map<number, SplitGroup>();
+  for (const share of shares) {
+    const adjustPct = share.adjustPct ?? 0;
+    const group = byAdjust.get(adjustPct) ?? { names: [], adjustPct, amount: share.amount };
+    group.names.push(nameOf(share.memberId));
+    group.amount = Math.max(group.amount, share.amount);
+    byAdjust.set(adjustPct, group);
+  }
+  return [...byAdjust.values()].sort((a, b) => b.adjustPct - a.adjustPct);
 }
 
 /**
@@ -56,5 +87,14 @@ export function summarizeSplit(
     participants.size === activeMemberIds.length &&
     activeMemberIds.every((id) => participants.has(id));
 
-  return { equal, everyone, names: entries.map((entry) => entry.name), entries };
+  const adjusted = shares.some((share) => (share.adjustPct ?? 0) !== 0);
+
+  return {
+    equal,
+    everyone,
+    names: entries.map((entry) => entry.name),
+    entries,
+    adjusted,
+    groups: adjusted ? groupByAdjustment(shares, nameOf) : [],
+  };
 }

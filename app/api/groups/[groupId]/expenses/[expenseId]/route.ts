@@ -2,12 +2,11 @@ import { logStatement } from "@/lib/activity";
 import { requireGroupMember, requireUser, type GroupMemberRef } from "@/lib/auth";
 import { getDb, nowIso } from "@/lib/db";
 import { forbidden, notFound } from "@/lib/errors";
-import { assertMembersAllowed, assertPaymentShape, loadExpense, parseExpenseInput } from "@/lib/expenses";
+import { assertMembersAllowed, assertPaymentShape, loadExpense, parseExpenseInput, resolveShares } from "@/lib/expenses";
 import { formatVnd } from "@/lib/format";
 import { buildViewer, listMembers } from "@/lib/group-queries";
 import { ok, readJson, route } from "@/lib/http";
 import { canModifyExpense } from "@/lib/permissions";
-import { splitEqual } from "@/lib/split";
 import type { Expense, Member, User } from "@/lib/types";
 
 async function loadOne(db: D1Database, groupId: string, expenseId: string): Promise<Expense> {
@@ -63,7 +62,7 @@ export const PUT = route(async (req, ctx) => {
   });
 
   const now = nowIso();
-  const shares = splitEqual(input.amount, input.participantMemberIds);
+  const shares = resolveShares(input, before.kind);
   // An omitted spentAt keeps the date the expense already had.
   const after: Expense = {
     ...before,
@@ -96,8 +95,10 @@ export const PUT = route(async (req, ctx) => {
     db.prepare("DELETE FROM expense_shares WHERE expense_id = ?").bind(expenseId),
     ...shares.map((share) =>
       db
-        .prepare("INSERT INTO expense_shares (expense_id, member_id, amount) VALUES (?, ?, ?)")
-        .bind(expenseId, share.memberId, share.amount),
+        .prepare(
+          "INSERT INTO expense_shares (expense_id, member_id, amount, adjust_pct) VALUES (?, ?, ?, ?)",
+        )
+        .bind(expenseId, share.memberId, share.amount, share.adjustPct ?? 0),
     ),
     logStatement(db, {
       groupId,
