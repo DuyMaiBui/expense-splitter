@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { Icon } from "@/components/Icon";
 import { api } from "@/lib/api-client";
+import { NEXT_PARAM, safeNext } from "@/lib/invite-link";
 import type { User } from "@/lib/types";
 
 export default function RegisterPage() {
@@ -15,6 +16,11 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [next, setNext] = useState<string | null>(null);
+
+  useEffect(() => {
+    setNext(safeNext(new URLSearchParams(window.location.search).get(NEXT_PARAM)));
+  }, []);
 
   async function handleSubmit(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -25,7 +31,7 @@ export default function RegisterPage() {
         method: "POST",
         body: { username, displayName, password },
       });
-      router.replace("/groups");
+      router.replace(next ?? "/groups");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Đăng ký thất bại.");
       setBusy(false);
@@ -81,7 +87,7 @@ export default function RegisterPage() {
         </div>
         {error && <p className="error">{error}</p>}
         <div className="row row-between">
-          <Link className="btn btn-ghost" href="/login" prefetch={false}>
+          <Link className="btn btn-ghost" href={next ? `/login?${NEXT_PARAM}=${encodeURIComponent(next)}` : "/login"} prefetch={false}>
             <Icon name="login" />
             <span>Đã có tài khoản</span>
           </Link>

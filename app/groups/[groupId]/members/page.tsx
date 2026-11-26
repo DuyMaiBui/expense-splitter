@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { BankLogo } from "@/components/BankPicker";
 import { Icon, IconButton } from "@/components/Icon";
 import { api } from "@/lib/api-client";
+import { inviteUrl } from "@/lib/invite-link";
 import { canRemoveMember } from "@/lib/permissions";
 import type { Group, Member, Viewer } from "@/lib/types";
 import { bankByBin } from "@/lib/vietqr";
@@ -35,7 +36,7 @@ export default function MembersPage() {
   const [mode, setMode] = useState<"name" | "username">("name");
   const [value, setValue] = useState("");
   const [adding, setAdding] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"code" | "link" | null>(null);
 
   const load = useCallback(
     async (fresh = false) => {
@@ -103,11 +104,11 @@ export default function MembersPage() {
     }
   }
 
-  async function copyCode(code: string): Promise<void> {
+  async function copy(text: string, what: "code" | "link"): Promise<void> {
     try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      window.setTimeout(() => setCopied(null), 1500);
     } catch {
       setError("Không sao chép được, hãy chép thủ công.");
     }
@@ -131,13 +132,21 @@ export default function MembersPage() {
               {group.inviteCode}
             </code>
           </span>
-          <IconButton
-            icon={copied ? "check" : "copy"}
-            label={copied ? "Đã chép" : "Sao chép"}
-            variant="ghost"
-            showLabel
-            onClick={() => void copyCode(group.inviteCode)}
-          />
+          <span className="row row-nowrap">
+            <IconButton
+              icon={copied === "code" ? "check" : "copy"}
+              label={copied === "code" ? "Đã chép" : "Sao chép mã"}
+              variant="ghost"
+              onClick={() => void copy(group.inviteCode, "code")}
+            />
+            <IconButton
+              icon={copied === "link" ? "check" : "link"}
+              label={copied === "link" ? "Đã chép link" : "Sao chép link mời"}
+              variant="ghost"
+              showLabel
+              onClick={() => void copy(inviteUrl(window.location.origin, group.inviteCode), "link")}
+            />
+          </span>
         </div>
       )}
 
