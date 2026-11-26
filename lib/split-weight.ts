@@ -14,7 +14,7 @@ import type { ExpenseShare } from "./types";
 export const MIN_ADJUST = -100;
 export const MAX_ADJUST = 1000;
 /** One tap of − / + in the form moves an adjustment by this many percent. */
-export const ADJUST_STEP = 5;
+export const ADJUST_STEP = 10;
 
 /**
  * Shares for `amount` with per-member adjustments (missing = 0). With no adjustment this is
