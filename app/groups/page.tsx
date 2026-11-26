@@ -6,7 +6,6 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { Icon, IconButton } from "@/components/Icon";
 import { api, ApiClientError } from "@/lib/api-client";
-import { INVITE_PARAM } from "@/lib/invite-link";
 import type { Group } from "@/lib/types";
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
@@ -38,14 +37,6 @@ export default function GroupsPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  // An invite link (/groups?invite=CODE) pre-fills the join form; joining stays one tap.
-  useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get(INVITE_PARAM);
-    if (code) {
-      setInviteCode(code.trim().toUpperCase());
-    }
-  }, []);
 
   async function submit(event: FormEvent, path: string, body: unknown, fallback: string) {
     event.preventDefault();

@@ -45,6 +45,7 @@ import { GET as settlementGET } from "@/app/api/groups/[groupId]/settlement/rout
 import { GET as ledgerGET } from "@/app/api/groups/[groupId]/members/[memberId]/ledger/route";
 import { GET as statsGET } from "@/app/api/groups/[groupId]/stats/route";
 import { POST as joinPOST } from "@/app/api/groups/join/route";
+import { GET as inviteGET } from "@/app/api/invites/[code]/route";
 import { GET as groupsGET, POST as groupsPOST } from "@/app/api/groups/route";
 import { PUT as profileBankPUT } from "@/app/api/profile/bank/route";
 
@@ -135,6 +136,7 @@ const h = {
   createGroup: (c: Client, name: string) => call(c, groupsPOST, { method: "POST", body: { name } }),
   listGroups: (c: Client) => call(c, groupsGET),
   join: (c: Client, inviteCode: string) => call(c, joinPOST, { method: "POST", body: { inviteCode } }),
+  invite: (c: Client, code: string) => call(c, inviteGET, { params: { code } }),
   getGroup: (c: Client, groupId: string) => call(c, groupGET, { params: { groupId } }),
   members: (c: Client, groupId: string) => call(c, membersGET, { params: { groupId } }),
   addMember: (c: Client, groupId: string, body: unknown) =>
@@ -408,6 +410,26 @@ describe("groups", () => {
 
     const bad = await h.join(bob, "ZZZZZZZZ");
     expect(bad.status).toBe(404);
+  });
+
+  it("invite preview names the group, flags membership, and writes nothing", async () => {
+    const { bob, gid, code } = await setup();
+    const carl = new Client();
+    await h.register(carl, { username: "carl", displayName: "Carl", password: "secret3" });
+
+    const outsider = await h.invite(carl, code.toLowerCase());
+    expect(outsider.status).toBe(200);
+    expect(outsider.json.data.invite).toEqual({
+      groupId: gid,
+      groupName: "Đi Đà Lạt",
+      memberCount: 3, // alice, bob and chi (no account)
+      alreadyMember: false,
+    });
+    expect((await h.listGroups(carl)).json.data.groups).toHaveLength(0);
+
+    expect((await h.invite(bob, code)).json.data.invite.alreadyMember).toBe(true);
+    expect((await h.invite(carl, "ZZZZZZZZ")).status).toBe(404);
+    expect((await h.invite(new Client(), code)).status).toBe(401);
   });
 
   it("separates 404 (no such group) from 403 (not a member)", async () => {
