@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { Icon } from "@/components/Icon";
 import { api } from "@/lib/api-client";
+import { NEXT_PARAM, safeNext } from "@/lib/invite-link";
 import type { User } from "@/lib/types";
 
 export default function LoginPage() {
@@ -14,6 +15,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Where to go after signing in (an invite link the proxy bounced here), read once on mount.
+  const [next, setNext] = useState<string | null>(null);
+
+  useEffect(() => {
+    setNext(safeNext(new URLSearchParams(window.location.search).get(NEXT_PARAM)));
+  }, []);
 
   async function handleSubmit(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -25,7 +32,7 @@ export default function LoginPage() {
         body: { username, password },
       });
       // The admin account has no groups: its only screen is /admin.
-      router.replace(user.role === "admin" ? "/admin" : "/groups");
+      router.replace(user.role === "admin" ? "/admin" : (next ?? "/groups"));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Đăng nhập thất bại.");
       setBusy(false);
@@ -67,7 +74,7 @@ export default function LoginPage() {
           <span>Quên mật khẩu?</span>
         </Link>
         <div className="row row-between">
-          <Link className="btn btn-ghost" href="/register" prefetch={false}>
+          <Link className="btn btn-ghost" href={next ? `/register?${NEXT_PARAM}=${encodeURIComponent(next)}` : "/register"} prefetch={false}>
             <Icon name="userPlus" />
             <span>Tạo tài khoản</span>
           </Link>

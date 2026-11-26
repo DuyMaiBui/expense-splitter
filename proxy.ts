@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+import { NEXT_PARAM } from "@/lib/invite-link";
+
 /**
  * Next.js 16 Proxy (the file convention formerly named `middleware`).
  *
@@ -39,7 +41,10 @@ export function proxy(request: NextRequest): NextResponse {
     );
   }
 
-  return NextResponse.redirect(new URL("/login", request.url));
+  // Keep where the visitor was going (an invite link, say) so login can send them back.
+  const login = new URL("/login", request.url);
+  login.searchParams.set(NEXT_PARAM, pathname + request.nextUrl.search);
+  return NextResponse.redirect(login);
 }
 
 export const config = {
