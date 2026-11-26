@@ -1301,3 +1301,82 @@ a {
 .flow-result--even {
   color: var(--muted);
 }
+
+/* Adjusted split: the per-person editor in the expense form and the summary in the list. */
+.badge-up {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+.badge-down {
+  background: var(--success-bg);
+  color: var(--success);
+  white-space: nowrap;
+}
+
+.split-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.split-row-pinned {
+  border-color: var(--primary);
+}
+
+.split-name {
+  min-width: 0;
+}
+
+.split-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.split-percent {
+  flex: 0 1 88px;
+  min-width: 68px;
+}
+
+.field.split-percent .input {
+  padding-left: 12px;
+  padding-right: 28px;
+  text-align: right;
+}
+
+.split-percent-sign {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.split-amount {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.split-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.split-summary-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}

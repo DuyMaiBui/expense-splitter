@@ -84,4 +84,33 @@ describe("summarizeSplit", () => {
     expect(summary.names).toEqual([]);
     expect(summary.entries).toEqual([]);
   });
+
+  it("groups an adjusted split by adjustment, highest first", () => {
+    const summary = summarizeSplit(
+      [
+        { memberId: "b", amount: 41_250, adjustPct: 10 },
+        { memberId: "c", amount: 41_250, adjustPct: 10 },
+        { memberId: "d", amount: 37_500, adjustPct: 0 },
+      ],
+      nameOf,
+    );
+
+    expect(summary.adjusted).toBe(true);
+    expect(summary.groups).toEqual([
+      { names: ["Hưng", "Mai"], adjustPct: 10, amount: 41_250 },
+      { names: ["Tuấn"], adjustPct: 0, amount: 37_500 },
+    ]);
+  });
+
+  it("has no groups when nobody is adjusted, even for an unequal split", () => {
+    const summary = summarizeSplit(
+      [
+        { memberId: "a", amount: 50_000 },
+        { memberId: "b", amount: 70_000 },
+      ],
+      nameOf,
+    );
+    expect(summary.adjusted).toBe(false);
+    expect(summary.groups).toEqual([]);
+  });
 });

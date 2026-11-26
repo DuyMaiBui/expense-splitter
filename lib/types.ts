@@ -130,6 +130,11 @@ export interface Viewer {
 export interface ExpenseShare {
   memberId: string;
   amount: number;
+  /**
+   * The percentage this member pays on top of a normal share (0 = normal, +10 = weight 1,1);
+   * see lib/split-weight.ts. Absent means 0. `amount` stays the money truth.
+   */
+  adjustPct?: number;
 }
 
 /**

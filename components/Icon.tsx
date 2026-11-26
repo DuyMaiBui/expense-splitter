@@ -53,6 +53,7 @@ const PATHS = {
     </>
   ),
   plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
   scale: (
     <>
       <path d="M12 4v16M6 20h12M5 8h14" />
